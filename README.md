@@ -2,6 +2,8 @@
 
 [![CI](https://github.com/vinivaliati/projeto-dvd/actions/workflows/ci.yml/badge.svg)](https://github.com/vinivaliati/projeto-dvd/actions/workflows/ci.yml)
 
+**English** | [Português](README.pt-BR.md)
+
 A local web app that turns a personal movie and TV collection into **authored DVD and Blu-ray
 discs with navigable menus**, plus **printable covers** for the cases.
 

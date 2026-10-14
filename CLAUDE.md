@@ -398,7 +398,7 @@ CLAUDE.md, inclusive a regra do travessão.
 - O README traz a atribuição exigida pelo TMDB (uso da API sem endosso do TMDB) e o logo
   conforme as regras deles.
 - As artes são para uso pessoal (imprimir as capas da própria coleção).
-- O README em inglês explica: o que o app faz, screenshots, arquitetura, como rodar com Docker,
+- O README em inglês (com versão em português em `README.pt-BR.md`, mantida em sincronia) explica: o que o app faz, screenshots, arquitetura, como rodar com Docker,
   decisões técnicas interessantes (calculadora, perfis, spike de Blu-ray).
 - Commits pequenos no padrão **Conventional Commits** (`feat:`, `fix:`, `docs:`, `test:`,
   `refactor:`, `chore:`). Branch principal `main`; trabalho de cada fase em branch própria
@@ -450,9 +450,9 @@ _Atualizar ao fim de cada sessão._
   `docs/plans/2026-10-14-fase-0-setup*.md`). App mínimo (`/` e `/health` com as versões das
   ferramentas), imagem Docker com toolchain fixada, compose, CI (quality + smoke Docker), README,
   LICENSE e os 6 agentes. Cada task foi revisada pelos agentes antes do ok do Vini.
-  `make lint` e `make test` verdes (30 testes, 100% de cobertura). PR #1 aberto com CI
-  verde (`quality` e `docker`). **Próximo passo:** merge do PR #1 em `main`; depois, Fase 1
-  (Biblioteca) começando por `/superpowers:brainstorm`.
+  `make lint` e `make test` verdes (30 testes, 100% de cobertura). PR #1 mergeado em
+  `main` com CI verde (`quality` e `docker`). README também em português (`README.pt-BR.md`).
+  **Próximo passo:** Fase 1 (Biblioteca), começando por `/superpowers:brainstorm`.
 - Os agentes de `.claude/agents/` só são reconhecidos pelo nome a partir de uma sessão nova; na
   sessão em que foram criados, rodam como agente genérico lendo o próprio arquivo.
 
