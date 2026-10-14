@@ -25,13 +25,21 @@ htmlcov/
 *.ac3
 *.sup
 *.iso
+*.mov
+*.webm
+*.mka
+*.dts
+*.wav
+*.flac
+*.idx
+*.sub
 VIDEO_TS/
 BDMV/
 
 # Working folders and downloaded art (ignored by folder so README screenshots still work)
-work/
-output/
-data/
+/work/
+/output/
+/data/
 
 # Database
 *.db

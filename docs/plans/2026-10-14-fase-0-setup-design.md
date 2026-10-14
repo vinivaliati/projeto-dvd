@@ -79,7 +79,6 @@ src/projeto_dvd/
   web/templates/
     index.html        # página hello (Jinja)
 tests/
-  fixtures/tool_versions/   # saída real de cada ferramenta, capturada da imagem
   unit/
     test_tools.py
     test_app.py
@@ -115,7 +114,7 @@ tests/
 - `pyproject.toml` com uv, `requires-python = ">=3.12,<3.13"`, `.python-version` versionado,
   layout `src/`.
 - Runtime: `fastapi`, `uvicorn` (sem `[standard]`: os extras não são usados), `jinja2`.
-- Dev: `ruff`, `mypy`, `pytest`, `pytest-cov`, `httpx` (para o `TestClient`).
+- Dev: `ruff`, `mypy`, `pytest`, `pytest-cov`, `httpx2` (para o `TestClient`; o Starlette 1.8 deprecou o `httpx`).
 - `ruff`: regras `E`, `F`, `I`, `B`, `UP`, `SIM`, `RUF`, e format.
 - `mypy --strict` em todo o projeto.
 - `pytest`: `--cov=projeto_dvd --cov-fail-under=90`, marcador `slow` registrado.
@@ -169,7 +168,7 @@ Workflow `ci.yml`, em push e pull request, com versão do uv fixada no `astral-s
 
 | Comportamento | Teste |
 |---|---|
-| `parse_version` extrai a versão certa da saída real das 6 ferramentas | unitário parametrizado com `tests/fixtures/tool_versions/` |
+| `parse_version` extrai a versão certa da saída real das 6 ferramentas | unitário parametrizado com trechos da saída real, inline no teste |
 | `parse_version` devolve `None` para saída vazia ou formato inesperado | unitário |
 | `detect_versions` aceita código de saída diferente de 0 (dvdauthor 1, spumux 255) | unitário (`subprocess.run` mockado) |
 | `detect_versions` devolve `None` em `FileNotFoundError` e em `TimeoutExpired` | unitário |
@@ -188,7 +187,7 @@ TDD: cada teste é escrito e visto falhando antes da implementação.
 ## Ordem de entrega (grupos)
 
 1. Configs de qualidade (`pyproject.toml`, `.python-version`, `uv.lock`, `Makefile`).
-2. App e testes (TDD), incluindo as fixtures capturadas da imagem.
+2. App e testes (TDD), com trechos da saída real das ferramentas.
 3. Docker (`Dockerfile`, `docker-compose.yml`, `.env.example`, `.dockerignore`).
 4. CI (`.github/workflows/ci.yml`).
 5. Repositório (`README.md`, `LICENSE`, `.gitignore`).

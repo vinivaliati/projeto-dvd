@@ -21,7 +21,7 @@ TIMEOUT_SECONDS = 10
 
 def parse_version(tool: str, output: str) -> str | None:
     """Extract the version of `tool` from its output, or None if it is not there."""
-    match = re.search(TOOLS[tool][1], output, re.MULTILINE)
+    match = re.search(TOOLS[tool][1], output)
     return match.group(1) if match else None
 
 

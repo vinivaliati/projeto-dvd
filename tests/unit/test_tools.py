@@ -1,4 +1,5 @@
 import subprocess
+import sys
 
 import pytest
 
@@ -108,7 +109,24 @@ def test_detect_versions_runs_without_shell_and_with_timeout(
     tools.detect_versions()
 
     assert calls
-    assert all(call.get("shell") is not True and call["timeout"] == 10 for call in calls)
+    assert all(
+        call.get("shell") is not True and call["timeout"] == tools.TIMEOUT_SECONDS for call in calls
+    )
+
+
+def test_detect_versions_reads_a_real_process(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A real child process that behaves like dvdauthor: version on stderr, exit code 1,
+    # plus a byte that is not valid UTF-8.
+    fake_dvdauthor = [
+        sys.executable,
+        "-c",
+        "import sys; sys.stderr.buffer.write(b'DVDAuthor::dvdauthor, version 0.7.2.\\n\\xff');"
+        " sys.exit(1)",
+    ]
+    regex = tools.TOOLS["dvdauthor"][1]
+    monkeypatch.setattr(tools, "TOOLS", {"dvdauthor": (fake_dvdauthor, regex)})
+
+    assert tools.detect_versions() == {"dvdauthor": "0.7.2"}
 
 
 def test_detect_versions_runs_each_tool_only_once(monkeypatch: pytest.MonkeyPatch) -> None:
