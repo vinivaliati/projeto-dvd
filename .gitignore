@@ -1,0 +1,40 @@
+# Python and tooling
+.venv/
+__pycache__/
+*.py[cod]
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# Secrets and local settings
+.env
+.claude/settings.local.json
+
+# Media and disc intermediates (never commit media)
+*.mkv
+*.mp4
+*.avi
+*.m4v
+*.ts
+*.m2ts
+*.vob
+*.mpg
+*.m2v
+*.ac3
+*.sup
+*.iso
+VIDEO_TS/
+BDMV/
+
+# Working folders and downloaded art (ignored by folder so README screenshots still work)
+work/
+output/
+data/
+
+# Database
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
