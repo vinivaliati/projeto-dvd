@@ -3,7 +3,7 @@
 - **Data:** 2026-10-14
 - **Branch:** `feat/fase-0-setup`
 - **Status:** revisado pelos agentes `tech-lead-midia`, `qa`, `revisor-codigo` e `organizador`;
-  aguardando aprovação do Vini.
+  aprovado pelo Vini e implementado (ver `docs/plans/2026-10-14-fase-0-setup.md`).
 
 ## Objetivo
 
@@ -93,10 +93,10 @@ tests/
 |---|---|---|---|---|
 | ffmpeg | `ffmpeg -version` | 0 | stdout | `ffmpeg version (\S+)` |
 | ffprobe | `ffprobe -version` | 0 | stdout | `ffprobe version (\S+)` |
-| dvdauthor | `dvdauthor --help` | 1 | stderr | `dvdauthor, version ([\d.]+)` |
-| spumux | `spumux --help` | 255 | stderr | `spumux, version ([\d.]+)` |
-| xorriso | `xorriso -version` | 0 | stdout | `^xorriso ([\d.]+)` |
-| tsMuxeR | `tsMuxeR --version` | 0 | stdout | `tsMuxeR version ([\d.]+)` |
+| dvdauthor | `dvdauthor --help` | 1 | stderr | `dvdauthor, version (\d+(?:\.\d+)*)` |
+| spumux | `spumux --help` | 255 | stderr | `spumux, version (\d+(?:\.\d+)*)` |
+| xorriso | `xorriso -version` | 0 | stdout | `^xorriso (\d+(?:\.\d+)*)` |
+| tsMuxeR | `tsMuxeR --version` | 0 | stdout | `tsMuxeR version (\d+(?:\.\d+)*)` |
 
 - Um dicionário único com comando e regex por ferramenta (adicionar ferramenta = uma entrada).
 - `parse_version(tool, output) -> str | None`: função pura.
@@ -158,7 +158,8 @@ Workflow `ci.yml`, em push e pull request, com versão do uv fixada no `astral-s
     README): `work/`, `output/`, `data/`;
   - banco: `*.db`, `*.db-journal`, `*.sqlite`, `*.sqlite3`.
   - `*.srt` **não** é ignorado (fixtures de teste vão usar).
-- `.dockerignore`: `.git`, `.env`, `.venv`, caches, `tests/`, `docs/`.
+- `.dockerignore` em allowlist: só `pyproject.toml`, `uv.lock`, `README.md` e `src/` entram no
+  contexto de build (`.env`, mídia e caches ficam fora por padrão).
 - `git mv readme.md README.md`; README em inglês: o que o app faz, status (Fase 0), stack, como
   rodar com Docker, comandos de desenvolvimento, manutenção (cópia do tsMuxeR), licença.
 - Licença MIT.

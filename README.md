@@ -34,8 +34,8 @@ Requirements: Docker (on Windows, Docker Desktop with WSL integration enabled).
 
 ```bash
 cp .env.example .env   # then edit the three host paths
-set -a; . ./.env; set +a
-mkdir -p "$HOST_WORK_DIR" "$HOST_OUTPUT_DIR"   # Docker would create missing ones as root
+# Docker would create missing folders as root; the subshell keeps .env out of your shell.
+(set -a; . ./.env; mkdir -p "$HOST_WORK_DIR" "$HOST_OUTPUT_DIR")
 make dev               # docker compose up --build
 ```
 
