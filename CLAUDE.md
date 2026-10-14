@@ -210,7 +210,10 @@ validado com teste antes de virar padrão.
   o destaque dos botões é um subpicture com **paleta de no máximo 4 cores** (restrição real para o
   designer); até 36 botões por menu.
 - Ferramentas: `ffmpeg` para o encode, `dvdauthor` para VIDEO_TS e navegação, `spumux` para
-  botões e legendas, `xorriso` para o ISO.
+  botões e legendas, `genisoimage -dvd-video -udf` para o ISO (ver Log de decisões: o `xorriso`
+  não gera a ponte UDF 1.02 que o DVD-Video exige).
+- O XML do `dvdauthor` sempre declara o formato de vídeo também no `<vmgm>`; sem isso ele falha
+  com "no video format specified for VMGM".
 
 ### 5.2 Blu-ray (BDMV)
 - Vídeo: H.264 1080p 23,976 fps, com x264 em modo de compatibilidade Blu-ray (`--bluray-compat`,
@@ -218,7 +221,8 @@ validado com teste antes de virar padrão.
 - Origem em HDR/4K: converter para SDR 1080p (tonemapping), porque o BDMV comum não aceita HDR.
 - Áudio: AC-3 até 640 kbps, DTS ou LPCM. Copiar sem recodificar quando a origem for compatível.
 - Legendas: PGS. O `tsMuxeR` converte SRT para PGS.
-- Estrutura: `tsMuxeR` gera BDMV/CERTIFICATE; `xorriso` gera o ISO em UDF 2.50.
+- Estrutura: `tsMuxeR` gera BDMV/CERTIFICATE e também o próprio `.iso` em UDF 2.5x (o `xorriso`
+  não faz UDF 2.50). Verificado na Fase 0 com o tsMuxeR 2.7.0.
 - **Menus de Blu-ray: principal risco do projeto.** Não existe ferramenta aberta madura. A Fase 6
   é um spike para comparar:
   1. menus HDMV (IGS), gerando o stream de menu;
@@ -247,27 +251,39 @@ validado com teste antes de virar padrão.
 | Banco | **SQLite** com **SQLModel**; migrações com **Alembic** |
 | Frontend | **Jinja2 + HTMX + Tailwind** (sem build pesado; reavaliar se o editor de menu precisar de mais interatividade) |
 | Jobs | tabela `jobs` no SQLite + processo worker separado. Sem Celery/Redis a menos que fique necessário |
-| Mídia | `ffmpeg`/`ffprobe`, `dvdauthor`, `spumux`, `tsMuxeR`, `xorriso` |
+| Mídia | `ffmpeg`/`ffprobe`, `dvdauthor`, `spumux`, `tsMuxeR`, `xorriso` (`genisoimage` entra na Fase 3) |
 | Imagens e PDF | **Pillow** para menus e artes; **reportlab** para o PDF de impressão |
 | Metadados | **TMDB API** via `httpx`, com cache local das respostas |
 | Infra | **Docker** + **docker-compose**; CI no **GitHub Actions** |
 
 ### 6.1 Variáveis de ambiente (`.env`, nunca commitar; manter `.env.example`)
+
+Variáveis do **compose** (caminhos no host, WSL), existentes desde a Fase 0:
 ```
-TMDB_API_KEY=
-TMDB_LANGUAGE=pt-BR
-MEDIA_ROOTS=/media/hd1          # pastas de origem, separadas por vírgula
-WORK_DIR=/work                  # intermediários (ext4 do WSL)
-OUTPUT_DIR=/output              # iso e pdf (pasta do Windows)
-DATABASE_URL=sqlite:////data/projeto_dvd.db
-DEFAULT_DVD_STANDARD=NTSC
+HOST_MEDIA_DIR=/mnt/e/Filmes                        # montada em /media (ro)
+HOST_WORK_DIR=/home/<usuario>/projeto-dvd-work      # montada em /work (ext4, nunca /mnt/c)
+HOST_OUTPUT_DIR=/mnt/c/Users/<usuario>/Videos/projeto-dvd   # montada em /output
+```
+As pastas precisam existir antes do `up` (o Docker cria as que faltam como root).
+
+Variáveis do **app** (caminhos dentro do container), entram quando forem usadas:
+```
+MEDIA_ROOTS=/media              # Fase 1; pastas de origem, separadas por vírgula
+WORK_DIR=/work                  # Fase 1
+OUTPUT_DIR=/output              # Fase 1
+DATABASE_URL=sqlite:////data/projeto_dvd.db   # Fase 1
+TMDB_API_KEY=                   # Fase 2
+TMDB_LANGUAGE=pt-BR             # Fase 2
+DEFAULT_DVD_STANDARD=NTSC       # Fase 3
 ```
 
 ### 6.2 Docker
-- `Dockerfile` com todas as ferramentas de mídia (versões fixadas).
-- `docker-compose.yml` com os serviços `web` e `worker`, os volumes `MEDIA_ROOTS` (ro),
-  `WORK_DIR`, `OUTPUT_DIR` e `data`.
-- `make dev`, `make test`, `make lint` (ou scripts equivalentes) documentados no README.
+- `Dockerfile` com todas as ferramentas de mídia: base por digest, pacotes apt por versão,
+  tsMuxeR e uv por checksum/digest. Usuário não root `app` (UID 1000).
+- `docker-compose.yml` com o serviço `web` (porta só em `127.0.0.1:8000`) e os volumes acima. O
+  serviço `worker` entra na Fase 3 (considerar `init: true` para recolher processos do ffmpeg).
+  O volume `data` entra na Fase 1.
+- `make dev`, `make test`, `make lint` e `make format` documentados no README.
 
 ---
 
@@ -417,7 +433,10 @@ Cada fase começa com `/superpowers:brainstorm` e um plano em `docs/plans/`.
 - **Gravador e mídia:** o Vini ainda vai comprar. Recomendação: gravador de **Blu-ray**, que grava
   DVD também. Para durabilidade, avaliar mídia **M-DISC** (existe em DVD e BD).
 - **Menus de Blu-ray:** resolver no spike da Fase 6.
-- **Soft pulldown no DVD** para fontes 23,976 fps: confirmar a abordagem com ffmpeg.
+- **Soft pulldown no DVD** para fontes 23,976 fps: o ffmpeg não grava as flags RFF de forma
+  confiável. Candidato para a Fase 3: `mpeg2enc` (pacote `mjpegtools`) ou pós-processamento.
+- **Checagem de escrita em `/work` e `/output`** no app (Fase 3): o Docker Desktop ignora
+  `create_host_path: false`, então uma pasta que falte vira root e o erro só aparece ao gravar.
 - **Medidas exatas das capas e do label:** confirmar com o material comprado.
 - **NTSC vs PAL:** padrão NTSC; confirmar com o player que vai ser usado.
 
@@ -427,9 +446,15 @@ Cada fase começa com `/superpowers:brainstorm` e um plano em `docs/plans/`.
 
 _Atualizar ao fim de cada sessão._
 
-- 2026-10-14: repo criado (`vinivaliati/projeto-dvd`, branch `main`), só com um `readme.md` vazio.
-  Escopo, stack e regras definidos neste arquivo. **Próximo passo: Fase 0**, começando por
-  `/superpowers:brainstorm` e pela criação dos agentes.
+- 2026-10-14: **Fase 0 implementada** na branch `feat/fase-0-setup` (spec e plano em
+  `docs/plans/2026-10-14-fase-0-setup*.md`). App mínimo (`/` e `/health` com as versões das
+  ferramentas), imagem Docker com toolchain fixada, compose, CI (quality + smoke Docker), README,
+  LICENSE e os 6 agentes. Cada task foi revisada pelos agentes antes do ok do Vini.
+  `make lint` e `make test` verdes (30 testes, 100% de cobertura). **Próximo passo:** PR para
+  `main` com CI verde no GitHub; depois, Fase 1 (Biblioteca) começando por
+  `/superpowers:brainstorm`.
+- Os agentes de `.claude/agents/` só são reconhecidos pelo nome a partir de uma sessão nova; na
+  sessão em que foram criados, rodam como agente genérico lendo o próprio arquivo.
 
 ---
 
@@ -444,3 +469,22 @@ _Atualizar ao fim de cada sessão._
 - 2026-10-14: Processo com Superpowers (brainstorm → plano → execução com TDD) e Ponytail
   (menor solução que funciona).
 - 2026-10-14: Sem travessão na escrita (ok de vez em quando em tópicos).
+- 2026-10-14 (Fase 0): serviço `worker` adiado para a Fase 3 (sem job, seria código morto).
+- 2026-10-14 (Fase 0): `config.py`, variáveis do app, TMDB e volume `data` adiados para as Fases
+  1 e 2; pastas de módulo da seção 7 criadas só na fase que as usa; `app.py` na raiz do pacote
+  até a Fase 1 (templates já em `web/templates/`).
+- 2026-10-14 (Fase 0): variáveis `HOST_*` do compose separadas dos caminhos do container.
+- 2026-10-14 (Fase 0): Debian trixie (ffmpeg 7.1) com apt fixado por versão e base por digest;
+  tsMuxeR 2.7.0 por sha256; uv por digest. O build quebra de propósito em atualização de
+  segurança, para a atualização ser consciente.
+- 2026-10-14 (Fase 0): container com usuário não root UID 1000; porta só em 127.0.0.1.
+- 2026-10-14 (Fase 0): `/health` com as versões das ferramentas, base do smoke test do CI.
+  `dvdauthor` e `spumux` não têm flag de versão (saem com 1 e 255, versão no stderr): o código de
+  saída é ignorado e a versão é lida por regex.
+- 2026-10-14 (Fase 0): `httpx2` no lugar de `httpx` para o `TestClient` (o Starlette 1.8 deprecou
+  o `httpx`). Decidir na Fase 2 qual cliente usar para o TMDB, para não manter os dois.
+- 2026-10-14 (Fase 0): ISO de DVD com `genisoimage -dvd-video -udf` (o `xorriso` não gera a ponte
+  UDF 1.02); ISO de Blu-ray gerado pelo próprio tsMuxeR (UDF 2.5x). Testado pelo
+  `tech-lead-midia`; entra no código nas Fases 3 e 6.
+- 2026-10-14 (Fase 0): licença MIT; `mypy --strict` no projeto todo; cobertura mínima de 90%;
+  actions de terceiros no CI fixadas por SHA; `GITHUB_TOKEN` só leitura.
