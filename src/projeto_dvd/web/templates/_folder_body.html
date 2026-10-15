@@ -5,7 +5,9 @@
 {% if probed is not none %}
 <p class="banner banner-ok">Scan concluído: {{ probed }} arquivo{{ "s" if probed != 1 }} lido{{ "s" if probed != 1 }} pelo ffprobe.</p>
 {% endif %}
-{% if folder.status.name == "CHANGED" %}
+{% if scanning == folder.name %}
+<p class="banner">Um scan desta pasta está em andamento. Recarregue a página quando ele terminar.</p>
+{% elif folder.status.name == "CHANGED" %}
 <p class="banner banner-warning">Arquivos mudaram desde o último scan. Escaneie de novo.</p>
 {% endif %}
 {% if folder.warning_count %}
@@ -73,7 +75,7 @@
       <td>
         {% if s.audio %}{{ s.audio | length }} faixa{{ "s" if s.audio | length != 1 }}: {% for track in s.audio %}{{ track.language }} {{ track.channels }}{{ ", " if not loop.last }}{% endfor %}{% else %}nenhum{% endif %}
       </td>
-      <td class="numbers">{{ subtitle_count }}{% if images %} ({{ images }} imagem){% endif %}</td>
+      <td class="numbers">{{ subtitle_count }}{% if images %} ({{ images }} {{ "imagem" if images == 1 else "imagens" }}){% endif %}</td>
       <td class="numbers">{{ s.chapters }}</td>
       <td>{% if file.warnings %}<span class="warning-icon" aria-hidden="true" title="{{ file.warnings | join(', ') }}">&#x26A0;&#xFE0E;</span><span class="sr-only">{{ file.warnings | join(', ') }}</span>{% endif %}</td>
     </tr>

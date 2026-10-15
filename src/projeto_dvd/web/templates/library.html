@@ -8,7 +8,11 @@
     <a class="card" href="{{ url_for('folder', name=folder.name | urlencode) }}">
       <span class="card-title">
         <span class="folder-name">{{ folder.name }}</span>
+        {% if scanning == folder.name %}
+        <span class="badge">escaneando</span>
+        {% else %}
         <span class="badge badge-{{ folder.status.name | lower }}">{{ folder.status }}</span>
+        {% endif %}
       </span>
       <span class="muted numbers">
         {{ folder.files | length }} vídeo{{ "s" if folder.files | length != 1 }} · {{ folder.size | size }}

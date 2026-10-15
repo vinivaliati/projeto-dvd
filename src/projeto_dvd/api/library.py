@@ -36,9 +36,11 @@ templates.env.filters.update(
     probe_reason=probe_reason,
 )
 
-# One scan at a time: ffprobe is heavy on a USB drive, and two scans of the same folder
-# would race on the same rows.
+# One scan at a time (per process; the app runs a single uvicorn worker): ffprobe is heavy
+# on a USB drive, and two scans of the same folder would race on the same rows.
 _scan_lock = threading.Lock()
+# The folder being scanned: halfway through, its rows look like "changed" files.
+_scanning: str | None = None
 
 SCAN_RUNNING = "Já existe um scan em andamento. Aguarde ele terminar."
 FFPROBE_MISSING = (
@@ -78,7 +80,8 @@ def library_page(request: Request, session: SessionDep, media_dir: MediaDirDep) 
     folders = list_disc_folders(media_dir)
     purge_missing_folders(session, folders)
     views = [folder_view(session, media_dir, name, path) for name, path in folders.items()]
-    return templates.TemplateResponse(request, "library.html", {"folders": views})
+    context = {"folders": views, "scanning": _scanning}
+    return templates.TemplateResponse(request, "library.html", context)
 
 
 @router.get("/folders/{name}", response_class=HTMLResponse, name="folder")
@@ -87,7 +90,7 @@ def folder_page(
 ) -> HTMLResponse:
     view = folder_view(session, media_dir, name, folder)
     # The body template is shared with the scan response: no scan result on a plain GET.
-    context = {"folder": view, "scan_error": None, "probed": None}
+    context = {"folder": view, "scan_error": None, "probed": None, "scanning": _scanning}
     return templates.TemplateResponse(request, "folder.html", context)
 
 
@@ -96,17 +99,20 @@ def scan(
     request: Request, name: str, folder: FolderDep, session: SessionDep, media_dir: MediaDirDep
 ) -> HTMLResponse:
     """Scan synchronously (sync route: runs in the thread pool) and return the folder body."""
+    global _scanning
     error = None
     probed = None
     if not _scan_lock.acquire(blocking=False):
         error = SCAN_RUNNING
     else:
         try:
+            _scanning = name
             probed = scan_folder(session, media_dir, name, folder, run_ffprobe)
         except FfprobeMissingError:
             error = FFPROBE_MISSING
         finally:
+            _scanning = None
             _scan_lock.release()
     view = folder_view(session, media_dir, name, folder)
-    context = {"folder": view, "scan_error": error, "probed": probed}
+    context = {"folder": view, "scan_error": error, "probed": probed, "scanning": None}
     return templates.TemplateResponse(request, "_folder_body.html", context)

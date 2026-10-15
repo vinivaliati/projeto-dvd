@@ -293,3 +293,45 @@ def test_routes_never_write_to_the_media_folder(
     client.get(folder_url("Senhor dos Aneis"))
 
     assert snapshot(media) == before
+
+
+def test_image_subtitles_are_counted_in_the_plural(
+    client: TestClient, media: Path, probes: list[str]
+) -> None:
+    make_file(media / "Senhor dos Aneis" / "A Sociedade do Anel.en.sup")
+
+    response = client.post(folder_url("Senhor dos Aneis") + "/scan")
+
+    assert "3 (2 imagens)" in response.text
+
+
+def test_pages_during_a_scan_say_it_is_running(
+    client: TestClient, media: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    make_file(media / "Senhor dos Aneis" / "As Duas Torres.mkv")
+    pages: list[str] = []
+
+    def slow(path: Path) -> ProbeResult:
+        # Halfway: one file has its row, the other not yet.
+        if path.name == "As Duas Torres.mkv":
+            pages.append(client.get("/").text)
+            pages.append(client.get(folder_url("Senhor dos Aneis")).text)
+        return ProbeResult(json=MOVIE_JSON, error=None)
+
+    monkeypatch.setattr(library, "run_ffprobe", slow)
+    after = client.post(folder_url("Senhor dos Aneis") + "/scan").text
+
+    library_page, folder_page = pages
+    assert "escaneando" in library_page and ">mudou<" not in library_page
+    assert "Um scan desta pasta está em andamento" in folder_page
+    assert "Arquivos mudaram" not in folder_page
+    assert "em andamento" not in after
+
+
+def test_a_failed_scan_request_shows_a_message(client: TestClient) -> None:
+    response = client.get(folder_url("Senhor dos Aneis"))
+
+    # HTMX 2 does not swap 4xx/5xx responses: without this the page would just go quiet.
+    assert "hx-on::response-error" in response.text
+    assert "hx-on::send-error" in response.text
+    assert "O scan falhou" in response.text
