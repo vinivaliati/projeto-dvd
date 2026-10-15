@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 from sqlmodel import Session
 
+from projeto_dvd.library.files import ExternalSubtitle
 from projeto_dvd.library.probe import READ_ERROR, run_ffprobe, summarize
 from projeto_dvd.library.scan import Status, folder_view, scan_folder
 from tests.tree import make_file
@@ -42,10 +43,12 @@ def test_scan_end_to_end(session: Session, tmp_path: Path) -> None:
             "-f", "lavfi", "-i", "testsrc=s=1280x720:r=25:d=2",
             "-f", "lavfi", "-i", "sine=d=2",
             "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "ac3",
-            str(disc / "Filme.mkv"),
+            # Accents and spaces, as in a Brazilian collection: needs a UTF-8 locale.
+            str(disc / "Ação é.mkv"),
         ],
         check=True,
     )  # fmt: skip
+    make_file(disc / "Ação é.pt-BR.srt", b"1\n00:00:00,000 --> 00:00:01,000\nOi\n")
     make_file(disc / "quebrado.mkv", b"not a video")
 
     probed = scan_folder(session, media, "Disco Teste", disc, run_ffprobe)
@@ -55,7 +58,12 @@ def test_scan_end_to_end(session: Session, tmp_path: Path) -> None:
     assert view.status == Status.WARNINGS
     good, broken = view.files
     assert good.summary is not None and good.summary.video is not None
-    assert good.summary.video.width == 1280
+    assert (good.summary.video.width, good.summary.video.height) == (1280, 720)
+    assert good.summary.video.fps == 25
+    assert [track.codec for track in good.summary.audio] == ["ac3"]
+    assert good.video.subtitles == (
+        ExternalSubtitle(name="Ação é.pt-BR.srt", language="pt-BR", image=False),
+    )
     assert good.summary.duration == pytest.approx(2, abs=0.1)
     assert broken.warnings == (READ_ERROR,)
     assert broken.error is not None and "Invalid data" in broken.error

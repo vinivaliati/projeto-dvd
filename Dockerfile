@@ -52,3 +52,6 @@ RUN uv sync --frozen
 COPY tests ./tests
 USER app
 CMD ["pytest", "-m", "slow", "--no-cov", "-p", "no:cacheprovider"]
+
+# The last stage is what a plain "docker build ." produces: keep it the runtime image.
+FROM runtime
