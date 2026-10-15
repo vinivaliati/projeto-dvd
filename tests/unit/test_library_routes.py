@@ -348,15 +348,18 @@ def test_pages_during_a_scan_say_it_is_running(
         if path.name == "As Duas Torres.mkv":
             pages.append(client.get("/").text)
             pages.append(client.get(folder_url("Senhor dos Aneis")).text)
+            pages.append(client.post(folder_url("Senhor dos Aneis") + "/scan").text)
         return ProbeResult(json=MOVIE_JSON, error=None)
 
     monkeypatch.setattr(library, "run_ffprobe", slow)
     after = client.post(folder_url("Senhor dos Aneis") + "/scan").text
 
-    library_page, folder_page = pages
+    library_page, folder_page, refused_scan = pages
     assert "escaneando" in library_page and ">mudou<" not in library_page
     assert "Um scan desta pasta está em andamento" in folder_page
     assert "Arquivos mudaram" not in folder_page
+    assert "Já existe um scan em andamento" in refused_scan
+    assert "Arquivos mudaram" not in refused_scan
     assert "em andamento" not in after
 
 

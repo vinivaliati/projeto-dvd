@@ -114,5 +114,6 @@ def scan(
             _scanning = None
             _scan_lock.release()
     view = folder_view(session, media_dir, name, folder)
-    context = {"folder": view, "scan_error": error, "probed": probed, "scanning": None}
+    # Our own scan has finished here; a refused one shows the scan that is still running.
+    context = {"folder": view, "scan_error": error, "probed": probed, "scanning": _scanning}
     return templates.TemplateResponse(request, "_folder_body.html", context)
