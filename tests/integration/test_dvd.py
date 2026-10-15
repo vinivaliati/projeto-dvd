@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from projeto_dvd.authoring.dvd.subtitles import FONT
 from projeto_dvd.jobs.pipeline import run_pipeline
 from projeto_dvd.jobs.runner import ProcessRunner
 from tests.integration import clips
@@ -49,3 +50,18 @@ def test_1080p_movie_becomes_a_dvd_iso(tmp_path: Path) -> None:
     assert [s["codec_name"] for s in streams[1:]] == ["ac3", "ac3"]
     leftovers = sorted(p.name for p in (tmp_path / "work" / "jobs" / "1").iterdir())
     assert leftovers == ["dvd.xml", "job.log"]
+
+
+def test_external_srt_in_windows_1252_becomes_a_dvd_subtitle(tmp_path: Path) -> None:
+    media = tmp_path / "media"
+    clips.movie_1080p(media / "Filme" / "Filme.mkv")
+    clips.srt_cp1252(media / "Filme" / "Filme.pt-BR.srt")
+
+    iso = generate(media, "Filme", tmp_path)
+
+    streams = dvd_probe(iso)["streams"]
+    assert isinstance(streams, list)
+    subtitles = [s for s in streams if s["codec_type"] == "subtitle"]
+    assert [s["codec_name"] for s in subtitles] == ["dvd_subtitle"]
+    assert subtitles[0]["tags"]["language"] == "por"
+    assert (FONT).exists()

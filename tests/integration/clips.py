@@ -53,3 +53,17 @@ def disc_source(media: Path, folder: str) -> DiscSource:
 
 def plan_for(media: Path, folder: str, **overrides: Any) -> DvdPlan:
     return suggested_plan(disc_source(media, folder), **overrides)
+
+
+def srt_cp1252(path: Path) -> Path:
+    text = ("1\r\n00:00:01,000 --> 00:00:03,000\r\nAção, coração e pão de açúcar!\r\n"
+            "É você? Não, é ele.\r\n\r\n"
+            "2\r\n00:00:05,000 --> 00:00:07,000\r\nUma fala com quarenta e dois caracteres\r\n"
+            "e mais uma linha também bem comprida aqui\r\n")  # fmt: skip
+    data = text.encode("cp1252")
+    try:
+        data.decode("utf-8")
+    except UnicodeDecodeError:
+        path.write_bytes(data)
+        return path
+    raise AssertionError("the test subtitle must not be valid UTF-8")

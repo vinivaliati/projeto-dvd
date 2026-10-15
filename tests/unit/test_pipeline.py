@@ -17,7 +17,7 @@ from projeto_dvd.jobs.pipeline import (
 )
 from projeto_dvd.jobs.runner import Canceled, RunResult, ToolError
 from projeto_dvd.library.probe import ProbeResult
-from projeto_dvd.planner.dvd_plan import DvdPlan
+from projeto_dvd.planner.dvd_plan import DvdPlan, SubtitleChoice
 from projeto_dvd.planner.source import VideoMode
 from tests.plans import make_plan
 from tests.tree import make_file
@@ -55,6 +55,8 @@ class FakeTools:
         elif command[0] == "dvdauthor":
             dvd = Path(command[2]).parent / "dvd" / "VIDEO_TS"
             make_file(dvd / "VTS_01_1.VOB", b"v" * 100)
+        elif command[-1].endswith(".srt"):
+            make_file(Path(command[-1]), b"1\n00:00:01,000 --> 00:00:02,000\nOi\n")
         elif command[-1] != "-":
             output = Path(command[-1] if command[0] != "genisoimage" else command[-2])
             make_file(output, b"\x00\x00\x01\xb3" + bytes([0x2D, 0x01, 0xE0, 0x31]) + b"\xff" * 8)
@@ -381,3 +383,45 @@ def test_cancel_during_the_copy_removes_the_part_file(dirs: tuple[Path, Path, Pa
 
     assert not part.exists()
     assert (job / "disc.iso").exists()
+
+
+def test_subtitles_are_rendered_one_stream_at_a_time(dirs: tuple[Path, Path, Path]) -> None:
+    media = dirs[0]
+    make_file(media / "Filme" / "Filme.pt.srt", "1\n00:00:01,000 --> 00:00:02,000\nAção\n"
+              .encode("cp1252"))  # fmt: skip
+    tools = FakeTools()
+    subtitles = (
+        SubtitleChoice(key="f:Filme.pt.srt", stream_index=None, file="Filme/Filme.pt.srt",
+                       language="pt"),
+        SubtitleChoice(key="s5", stream_index=5, file=None, language="en"),
+    )  # fmt: skip
+
+    run(dirs, tools, subtitles=subtitles, subtitle_on=True)
+
+    spumux = [c for c in tools.commands if c[0] == "spumux"]
+    assert [c[2] for c in spumux] == ["0", "1"]
+    extract = [c for c in tools.commands if "-c:s" in c]
+    assert extract[0][extract[0].index("-map") + 1] == "0:5"
+    assert not list(dirs[1].glob("sub*"))  # cleaned after use
+
+
+def test_empty_external_subtitle_fails_with_its_name(dirs: tuple[Path, Path, Path]) -> None:
+    make_file(dirs[0] / "Filme" / "Filme.pt.srt", b"")
+    subtitles = (SubtitleChoice(key="f:Filme.pt.srt", stream_index=None,
+                                file="Filme/Filme.pt.srt", language="pt"),)  # fmt: skip
+
+    with pytest.raises(PipelineError) as caught:
+        run(dirs, FakeTools(), subtitles=subtitles)
+
+    assert caught.value.message == "A legenda Filme.pt.srt está vazia ou inválida."
+    assert caught.value.step == Step.SUBTITLES
+
+
+def test_missing_external_subtitle_fails_with_its_name(dirs: tuple[Path, Path, Path]) -> None:
+    subtitles = (SubtitleChoice(key="f:Sumiu.srt", stream_index=None, file="Filme/Sumiu.srt",
+                                language="pt"),)  # fmt: skip
+
+    with pytest.raises(PipelineError) as caught:
+        run(dirs, FakeTools(), subtitles=subtitles)
+
+    assert caught.value.message == "A legenda Sumiu.srt não foi encontrada."

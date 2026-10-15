@@ -7,6 +7,7 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         dvdauthor=0.7.2-3 \
         ffmpeg=7:7.1.5-0+deb13u1 \
+        fonts-dejavu-core=2.37-8 \
         genisoimage=9:1.1.11-4 \
         xorriso=1.5.6-1.2+b1 \
     && rm -rf /var/lib/apt/lists/*

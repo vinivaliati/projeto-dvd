@@ -27,6 +27,13 @@ from projeto_dvd.authoring.dvd.mux import (
     mux_command,
     parse_first_pts,
 )
+from projeto_dvd.authoring.dvd.subtitles import (
+    SubtitleError,
+    extract_command,
+    prepare_srt,
+    spumux_command,
+    spumux_xml,
+)
 from projeto_dvd.config import Settings
 from projeto_dvd.db.session import make_engine, migrate
 from projeto_dvd.encode.audio import audio_command
@@ -37,7 +44,7 @@ from projeto_dvd.library.files import list_disc_folders
 from projeto_dvd.library.probe import run_ffprobe
 from projeto_dvd.library.scan import folder_view, scan_folder
 from projeto_dvd.planner.disc_source import folder_reasons, prepare, run_capture, suggested_plan
-from projeto_dvd.planner.dvd_plan import DvdPlan
+from projeto_dvd.planner.dvd_plan import DvdPlan, SubtitleChoice
 from projeto_dvd.planner.source import VideoMode
 
 COPY_CHUNK = 16 * 1024 * 1024
@@ -164,6 +171,10 @@ def run_pipeline(
     m2v.unlink()
     for number in range(1, len(plan.audio) + 1):
         audio_path(job_dir, number).unlink()
+    progress = begin(Step.SUBTITLES)
+    for number, subtitle in enumerate(plan.subtitles):
+        _render_subtitle(plan, subtitle, number, source, media_dir, job_dir, tools)
+        progress((number + 1) / len(plan.subtitles))
     begin(Step.AUTHOR)
     xml = job_dir / "dvd.xml"
     xml.write_text(dvdauthor_xml(plan, job_dir), encoding="utf-8")
@@ -178,6 +189,44 @@ def run_pipeline(
     iso = job_dir / "disc.iso"
     iso_path = _publish(iso, output_dir, plan, begin(Step.COPY), checkpoint)
     return PipelineResult(iso_path=iso_path, qa_json=None)
+
+
+def _render_subtitle(
+    plan: DvdPlan,
+    subtitle: SubtitleChoice,
+    number: int,
+    source: Path,
+    media_dir: Path,
+    job_dir: Path,
+    tools: Tools,
+) -> None:
+    """Draw one SRT as subpicture stream `number` into movie.mpg (spumux, stdin to stdout)."""
+    srt = job_dir / f"sub{number}.srt"
+    with _tool_step(Step.SUBTITLES):
+        if subtitle.stream_index is not None:
+            tools.run(extract_command(source, subtitle.stream_index, srt))
+            name = f"interna {subtitle.stream_index}"
+            data = srt.read_bytes()
+        else:
+            assert subtitle.file is not None
+            name = Path(subtitle.file).name
+            try:
+                data = (media_dir / subtitle.file).read_bytes()
+            except OSError as error:
+                message = f"A legenda {name} não foi encontrada."
+                raise PipelineError(message, Step.SUBTITLES) from error
+    try:
+        srt.write_text(prepare_srt(data, name), encoding="utf-8")
+    except SubtitleError as error:
+        raise PipelineError(str(error), Step.SUBTITLES) from error
+    xml_file = job_dir / f"sub{number}.xml"
+    xml_file.write_text(spumux_xml(srt, plan.aspect), encoding="utf-8")
+    movie, rendered = job_dir / "movie.mpg", job_dir / "movie.next.mpg"
+    with _tool_step(Step.SUBTITLES):
+        tools.run(spumux_command(xml_file, number), stdin=movie, stdout=rendered)
+    os.replace(rendered, movie)
+    srt.unlink()
+    xml_file.unlink()
 
 
 def preflight(
