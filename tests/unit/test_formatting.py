@@ -33,6 +33,7 @@ def test_probe_reason_drops_the_file_path() -> None:
     ("size", "text"),
     [
         (38_000_000_000, "38 GB"),
+        (12_340_000_000, "12 GB"),
         (4_230_000_000, "4,2 GB"),
         (1_000_000_000, "1 GB"),
         (512_000_000, "512 MB"),
@@ -47,7 +48,15 @@ def test_format_size(size: int, text: str) -> None:
 
 @pytest.mark.parametrize(
     ("seconds", "text"),
-    [(10680, "2h58"), (3600, "1h00"), (2700, "45 min"), (20, "0 min"), (None, "?")],
+    [
+        (10680, "2h58"),
+        (3600, "1h00"),
+        (3599, "1h00"),
+        (2700, "45 min"),
+        (2690, "45 min"),
+        (20, "0 min"),
+        (None, "?"),
+    ],
 )
 def test_format_duration(seconds: float | None, text: str) -> None:
     assert format_duration(seconds) == text

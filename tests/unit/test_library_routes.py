@@ -1,3 +1,4 @@
+import html
 import json
 import re
 import unicodedata
@@ -11,7 +12,7 @@ from fastapi.testclient import TestClient
 from projeto_dvd.api import library
 from projeto_dvd.app import create_app
 from projeto_dvd.config import Settings
-from projeto_dvd.library.probe import FfprobeMissingError, ProbeResult
+from projeto_dvd.library.probe import ABOVE_1080P, HDR, FfprobeMissingError, ProbeResult
 from tests.tree import make_file, snapshot
 
 MOVIE_JSON = json.dumps(
@@ -44,6 +45,22 @@ MOVIE_JSON = json.dumps(
     }
 )
 
+UHD_HDR_JSON = json.dumps(
+    {
+        "streams": [
+            {
+                "codec_type": "video",
+                "codec_name": "hevc",
+                "width": 3840,
+                "height": 2160,
+                "avg_frame_rate": "24000/1001",
+                "color_transfer": "smpte2084",
+            }
+        ],
+        "format": {"duration": "7200.0"},
+    }
+)
+
 
 @pytest.fixture
 def media(tmp_path: Path) -> Path:
@@ -60,7 +77,12 @@ def probes(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     def fake(path: Path) -> ProbeResult:
         calls.append(path.name)
         if path.name.startswith("ruim"):
-            return ProbeResult(json=None, error=f"{path}: Invalid data found when processing input")
+            error = (
+                f"[matroska,webm @ 0x5945] EBML header parsing failed\n{path}: Invalid data found"
+            )
+            return ProbeResult(json=None, error=error)
+        if path.name.startswith("uhd"):
+            return ProbeResult(json=UHD_HDR_JSON, error=None)
         return ProbeResult(json=MOVIE_JSON, error=None)
 
     monkeypatch.setattr(library, "run_ffprobe", fake)
@@ -145,6 +167,8 @@ def test_folder_with_special_characters_opens_from_library_link(
 
     assert response.status_code == 200
     assert "Ação #1? 100%" in response.text
+    scan_url = html.unescape(re.search(r'hx-post="([^"]*)"', response.text).group(1))  # type: ignore[union-attr]
+    assert client.post(scan_url).status_code == 200
 
 
 # Folder page
@@ -158,6 +182,9 @@ def test_folder_page_before_scan(client: TestClient) -> None:
     assert 'hx-post="' in response.text
     assert 'hx-disabled-elt="this"' in response.text
     assert 'hx-sync="this:drop"' in response.text
+    assert 'hx-target="#folder-body"' in response.text
+    assert 'hx-swap="innerHTML"' in response.text
+    assert '<div id="folder-body">' in response.text
 
 
 def test_folder_created_in_nfd_opens_by_its_nfc_url(client: TestClient, media: Path) -> None:
@@ -213,6 +240,7 @@ def test_unreadable_file_is_shown_with_its_error(
     assert "Não foi possível ler o arquivo" in response.text
     assert "Invalid data found" in response.text
     assert str(media) not in response.text  # the name is in the first column already
+    assert "0x5945" not in response.text  # only the last line of stderr
     assert "1 arquivo com aviso" in response.text
 
 
@@ -223,6 +251,8 @@ def test_changed_files_are_announced(client: TestClient, media: Path, probes: li
     response = client.get(folder_url("Senhor dos Aneis"))
 
     assert "Arquivos mudaram desde o último scan" in response.text
+    assert "ainda não escaneado" in response.text
+    assert "1080p · H.264" in response.text  # the old file keeps its data
     # The size of the new file sits under "Tamanho", not under "Duração".
     assert re.search(r"As Duas Torres.mkv</td>\s*<td></td>\s*<td class=\"numbers\">", response.text)
 
@@ -240,6 +270,7 @@ def test_missing_ffprobe_shows_one_message(
     assert response.status_code == 200
     assert "ffprobe não foi encontrado" in response.text
     assert "Não foi possível ler o arquivo" not in response.text
+    assert "Scan concluído" not in response.text
 
 
 def test_scan_while_another_is_running_reports_it(client: TestClient, probes: list[str]) -> None:
@@ -250,6 +281,7 @@ def test_scan_while_another_is_running_reports_it(client: TestClient, probes: li
         library._scan_lock.release()
 
     assert "Já existe um scan em andamento" in response.text
+    assert "Scan concluído" not in response.text
     assert probes == []
 
 
@@ -335,3 +367,31 @@ def test_a_failed_scan_request_shows_a_message(client: TestClient) -> None:
     assert "hx-on::response-error" in response.text
     assert "hx-on::send-error" in response.text
     assert "O scan falhou" in response.text
+
+
+@pytest.mark.parametrize("name", ["Vazia", "SoLegendas"])
+def test_folders_without_videos_are_empty(client: TestClient, media: Path, name: str) -> None:
+    (media / "Vazia").mkdir()
+    make_file(media / "SoLegendas" / "a.srt")
+
+    page = client.get(folder_url(name)).text
+    card = client.get("/").text.split(f">{name}<", 1)[1].split("</li>", 1)[0]
+
+    assert "Nenhum vídeo nesta pasta." in page
+    assert "<table" not in page
+    assert "badge-empty" in card
+
+
+def test_hdr_and_above_1080p_are_flagged(
+    client: TestClient, media: Path, probes: list[str]
+) -> None:
+    make_file(media / "Senhor dos Aneis" / "uhd.mkv")
+
+    response = client.post(folder_url("Senhor dos Aneis") + "/scan")
+
+    assert "2160p · HEVC" in response.text
+    assert ">HDR</span>" in response.text
+    for warning in (HDR, ABOVE_1080P):  # listed in the details, not only in the icon title
+        assert f"</span> {warning}</li>" in response.text
+    assert 'class="warning-icon"' in response.text
+    assert "1 arquivo com aviso" in response.text
