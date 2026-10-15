@@ -251,7 +251,7 @@ validado com teste antes de virar padrão.
 | Camada | Escolha |
 |---|---|
 | Linguagem | Python 3.12, gerenciado com **uv** |
-| Qualidade | **ruff** (lint e format), **mypy** (strict nos módulos novos), **pytest** + pytest-cov |
+| Qualidade | **ruff** (lint e format), **mypy** (strict no projeto todo), **pytest** + pytest-cov |
 | API | **FastAPI** + **Pydantic** v2 |
 | Banco | **SQLite** com **SQLModel**; migrações com **Alembic** |
 | Frontend | **Jinja2 + HTMX + CSS próprio** (sem build; reavaliar no editor de menus, Fase 4) |
@@ -312,7 +312,9 @@ src/projeto_dvd/
   covers/         # layout de capa, lombada, verso, label, PDF
   jobs/           # fila, worker, progresso
   db/             # modelos SQLModel, sessão, migrações
+  app.py          # fábrica create_app (uvicorn --factory)
   config.py       # settings via pydantic-settings
+  tools.py        # versões das ferramentas de mídia (/health)
 tests/
   unit/
   integration/    # usam clipes curtos gerados com ffmpeg -f lavfi
@@ -428,8 +430,8 @@ não mudam; a Fase 3 vem antes da 2 para ter um disco de verdade o quanto antes.
       `.env.example`, Dockerfile com as ferramentas de mídia, docker-compose, CI, README inicial,
       agentes em `.claude/agents/`. Pronto quando: `docker compose up` sobe a página "hello" e o
       CI fica verde.
-- [x] **Fase 1: Biblioteca.** Pasta de entrada com uma subpasta por disco, scan, ffprobe,
-      catálogo, tela de biblioteca e tela da pasta.
+- [ ] **Fase 1: Biblioteca.** Pasta de entrada com uma subpasta por disco, scan, ffprobe,
+      catálogo, tela de biblioteca e tela da pasta. (Implementada na branch, PR pendente.)
 - [ ] **Fase 3: DVD mínimo.** 1 filme → ISO sem menu, com perfil DVD-5/DVD-9 escolhido, que passa
       no checklist. Pronto em duas etapas: agora, ISO validado no VLC; depois, o teste num player
       físico, quando o gravador for comprado.
@@ -447,12 +449,17 @@ não mudam; a Fase 3 vem antes da 2 para ter um disco de verdade o quanto antes.
 ## 13. Decisões em aberto
 
 - **Gravador e mídia:** o Vini ainda vai comprar. Recomendação: gravador de **Blu-ray**, que grava
-  DVD também. Para durabilidade, avaliar mídia **M-DISC** (existe em DVD e BD).
+  DVD também. Para durabilidade, avaliar mídia **M-DISC** (existe em DVD e BD). A segunda etapa
+  do pronto da Fase 3 (teste num player físico) depende dessa compra.
 - **Menus de Blu-ray:** resolver no spike da Fase 6.
 - **Soft pulldown no DVD** para fontes 23,976 fps: o ffmpeg não grava as flags RFF de forma
   confiável. Candidato para a Fase 3: `mpeg2enc` (pacote `mjpegtools`) ou pós-processamento.
-- **Checagem de escrita em `/work` e `/output`** no app (Fase 3): o Docker Desktop ignora
-  `create_host_path: false`, então uma pasta que falte vira root e o erro só aparece ao gravar.
+- **Checagem de escrita em `/work`, `/output` e `/data`** no app (Fase 3): o Docker Desktop ignora
+  `create_host_path: false`, então uma pasta que falte vira root e o erro só aparece ao gravar. O
+  volume `data` mantém o dono antigo se já existia ou se o `UID` da imagem mudar.
+- **Campos de mídia da Fase 3 no resumo do ffprobe** (`field_order`, `pix_fmt`, `sample_rate`,
+  `color_primaries`): precisam entrar no `Summary` para que os testes `slow` comparem as fixtures
+  também nesses campos.
 - **Medidas exatas das capas e do label:** confirmar com o material comprado.
 - **NTSC vs PAL:** padrão NTSC; confirmar com o player que vai ser usado.
 
@@ -535,4 +542,11 @@ _Atualizar ao fim de cada sessão._
 - 2026-10-15 (Fase 1): HDR inclui Dolby Vision; perfil 5 com aviso próprio. A fixture DV5 é
   escrita à mão: depois de atualizar o ffmpeg, conferir se o ffprobe ainda chama o side data de
   "DOVI configuration record".
-- 2026-10-15: roadmap reordenado para 1 → 3 → 2 → 4 → 5 → 6 → 7 → 8, mantendo os números das fases.
+- 2026-10-15 (Fase 1): `find_videos` conta uma vez só dois nomes iguais em NFC e NFD (fica com o
+  primeiro); antes, o segundo derrubava o scan com erro de banco.
+- 2026-10-15 (Fase 1): sem `TrustedHostMiddleware` e sem proteção CSRF por enquanto: o app é
+  local, a porta só abre em 127.0.0.1 e o scan só lê. Reavaliar quando houver ação que grava
+  (Fase 3).
+- 2026-10-15: roadmap reordenado para 1 → 3 → 2 → 4 → 5 → 6 → 7 → 8 (números mantidos), para ter
+  um disco de verdade antes da curadoria. A Fase 3 fica pronta em duas etapas: ISO validado no VLC
+  agora; teste num player físico quando o gravador for comprado (ver 13).

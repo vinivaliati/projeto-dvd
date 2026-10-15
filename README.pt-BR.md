@@ -42,7 +42,10 @@ entrada\                          (HOST_MEDIA_DIR, montada em /media, somente le
 
 - Vídeos: `.mkv`, `.mp4`, `.m4v`, `.avi`, `.mov`, `.ts`, `.m2ts`.
 - Legendas externas: `.srt`, `.ass`, `.ssa`, `.sup`, e `.idx` ao lado do seu `.sub`. A legenda
-  pertence ao vídeo cujo nome começa o dela (`Filme.pt-BR.srt` → `Filme.mkv`).
+  pertence ao vídeo cujo nome começa o dela (`Filme.pt-BR.srt` → `Filme.mkv`); quando vários
+  combinam, ganha o nome mais longo (`Filme.2.pt.srt` → `Filme.2.mkv`).
+- Vídeos soltos direto na pasta de entrada, fora de uma pasta de disco, não aparecem. Links
+  simbólicos são ignorados.
 - O scan é incremental: um arquivo só é lido de novo quando o tamanho ou a data de modificação
   mudam.
 - A pasta de entrada pode ficar no `C:` ou no próprio HD externo. Copiar para o `C:` ocupa
@@ -66,6 +69,10 @@ cp .env.example .env   # depois ajuste os três caminhos
 (set -a; . ./.env; mkdir -p "$HOST_WORK_DIR" "$HOST_OUTPUT_DIR")
 make dev               # docker compose up --build
 ```
+
+A pasta de entrada (`HOST_MEDIA_DIR`) não é criada para você: crie com uma subpasta por disco e,
+se ela estiver no HD externo, conecte o HD antes do `make dev`. Sem isso, o Docker monta uma pasta
+vazia e a biblioteca não mostra nenhum disco.
 
 Abra <http://localhost:8000>. O endereço <http://localhost:8000/health> lista as versões das
 ferramentas de mídia encontradas no container e responde 503 se faltar alguma.
@@ -102,6 +109,8 @@ MEDIA_DIR=/caminho/para/entrada DATABASE_URL=sqlite:///./projeto_dvd.db \
   Debian, checksum do tsMuxeR). Quando o Debian publica uma atualização de segurança, o build
   quebra de propósito: atualize as versões no `Dockerfile` e faça o commit. Depois de atualizar
   o ffmpeg, rode `make test-slow`: ele compara as fixtures commitadas com a saída do ffprobe novo.
+  A fixture de Dolby Vision perfil 5 é escrita à mão: confira também se o ffprobe ainda chama o
+  side data de "DOVI configuration record".
 - O tsMuxeR tem pouca atividade no projeto original. Guarde uma cópia do
   `tsMuxer-2.7.0-linux.zip` (sha256 `ceaaa181ab70e201685b1e45260d337d1cbdb0aba1408d4fbc47e232a7e4c987`)
   fora do GitHub.

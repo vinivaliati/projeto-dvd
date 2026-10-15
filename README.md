@@ -43,7 +43,10 @@ entrada\                          (HOST_MEDIA_DIR, mounted read-only at /media)
 
 - Videos: `.mkv`, `.mp4`, `.m4v`, `.avi`, `.mov`, `.ts`, `.m2ts`.
 - External subtitles: `.srt`, `.ass`, `.ssa`, `.sup`, and `.idx` next to its `.sub`. A
-  subtitle belongs to the video whose name starts it (`Movie.pt-BR.srt` → `Movie.mkv`).
+  subtitle belongs to the video whose name starts it (`Movie.pt-BR.srt` → `Movie.mkv`); when
+  several match, the longest name wins (`Movie.2.pt.srt` → `Movie.2.mkv`).
+- Videos placed directly in the input folder, outside a disc folder, are not listed. Symbolic
+  links are ignored.
 - Rescans are incremental: a file is read again only when its size or modification time
   changes.
 - The input folder can be on `C:` or on the external drive itself. Copying to `C:` takes space
@@ -67,6 +70,10 @@ cp .env.example .env   # then edit the three host paths
 (set -a; . ./.env; mkdir -p "$HOST_WORK_DIR" "$HOST_OUTPUT_DIR")
 make dev               # docker compose up --build
 ```
+
+The input folder (`HOST_MEDIA_DIR`) is not created for you: create it with one subfolder per
+disc, and if it lives on the external drive, connect the drive before `make dev`. Otherwise
+Docker mounts an empty folder and the library shows no discs.
 
 Open <http://localhost:8000>. <http://localhost:8000/health> lists the media tool versions found
 in the container and returns 503 if any of them is missing.
@@ -102,7 +109,8 @@ MEDIA_DIR=/path/to/entrada DATABASE_URL=sqlite:///./projeto_dvd.db \
 - The media toolchain is pinned (base image digest, Debian package versions, tsMuxeR checksum).
   When Debian ships a security update the build breaks on purpose; update the pins in the
   `Dockerfile` and commit. After an ffmpeg update, run `make test-slow`: it compares the
-  committed fixtures with the new ffprobe output.
+  committed fixtures with the new ffprobe output. The Dolby Vision profile 5 fixture is
+  hand-written: also check that ffprobe still names its side data "DOVI configuration record".
 - tsMuxeR has low upstream activity. Keep a copy of
   `tsMuxer-2.7.0-linux.zip` (sha256 `ceaaa181ab70e201685b1e45260d337d1cbdb0aba1408d4fbc47e232a7e4c987`)
   outside GitHub.
