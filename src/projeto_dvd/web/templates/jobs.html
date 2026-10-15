@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Jobs{% endblock %}
+{% block content %}
+<h1>Jobs</h1>
+{% if jobs %}
+<div class="table-wrap">
+<table class="files">
+  <thead><tr><th>Pasta</th><th>Perfil</th><th>Status</th><th>Criado</th></tr></thead>
+  <tbody>
+  {% for job, plan in jobs %}
+    <tr>
+      <td><a class="folder-name" href="{{ url_for('job_page', job_id=job.id) }}">{{ job.folder }}</a></td>
+      <td>{{ profiles[plan.profile].name }}</td>
+      <td>{{ {"queued": "na fila", "running": "gerando", "done": "pronto", "failed": "falhou", "canceled": "cancelado"}[job.status] }}{% if job.status == "running" %} · {{ (job.progress * 100) | int }}%{% endif %}</td>
+      <td class="muted">{{ job.created_at | ago(now) }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}
+<p class="empty">Nenhum job ainda. Abra uma pasta na Biblioteca e use "Gerar DVD".</p>
+{% endif %}
+{% endblock %}

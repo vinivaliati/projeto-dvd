@@ -1,13 +1,16 @@
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
 
 from projeto_dvd.api.formatting import (
+    format_ago,
     format_aspect,
     format_channels,
     format_duration,
     format_fps,
     format_language,
+    format_remaining,
     format_size,
     format_subtitle_kind,
     last_line,
@@ -151,3 +154,29 @@ def test_language_label() -> None:
 )
 def test_subtitle_kind_label(kind: str, label: str) -> None:
     assert format_subtitle_kind(kind) == label
+
+
+NOW = datetime(2026, 10, 15, 12, 0, tzinfo=UTC)
+
+
+@pytest.mark.parametrize(
+    ("delta", "text"),
+    [(timedelta(seconds=30), "agora"), (timedelta(minutes=5), "há 5 min"),
+     (timedelta(hours=2, minutes=10), "há 2 h"), (timedelta(days=3), "há 3 dias"),
+     (timedelta(days=1), "há 1 dia")],
+)  # fmt: skip
+def test_format_ago(delta: timedelta, text: str) -> None:
+    assert format_ago(NOW - delta, NOW) == text
+
+
+@pytest.mark.parametrize(
+    ("seconds", "text"),
+    [(None, "calculando..."), (40, "menos de 1 min"), (900, "cerca de 15 min"),
+     (4800, "cerca de 1h20")],
+)  # fmt: skip
+def test_format_remaining(seconds: float | None, text: str) -> None:
+    assert format_remaining(seconds) == text
+
+
+def test_format_ago_without_a_date() -> None:
+    assert format_ago(None, NOW) == "?"

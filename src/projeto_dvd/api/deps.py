@@ -10,11 +10,13 @@ from sqlalchemy import Engine
 from sqlmodel import Session
 
 from projeto_dvd.api.formatting import (
+    format_ago,
     format_aspect,
     format_channels,
     format_duration,
     format_fps,
     format_language,
+    format_remaining,
     format_size,
     format_subtitle_kind,
     probe_reason,
@@ -36,6 +38,8 @@ templates.env.filters.update(
     language=format_language,
     channels=format_channels,
     subtitle_kind=format_subtitle_kind,
+    ago=format_ago,
+    remaining=format_remaining,
 )
 
 

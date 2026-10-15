@@ -206,3 +206,20 @@ button.primary[disabled] { background: var(--border); color: var(--muted); curso
 .nav { display: flex; gap: 16px; margin-bottom: 16px; color: var(--muted); }
 .nav a { color: var(--muted); text-decoration: none; }
 .nav a:hover, .nav a[aria-current="page"] { color: var(--text); }
+
+/* Job page */
+.progress-line { display: flex; align-items: center; gap: 12px; }
+.progress-line progress { flex: 1; height: 12px; accent-color: var(--accent); }
+.steps { padding-left: 20px; }
+.step-done { color: var(--muted); }
+.step-done::marker { content: "✓  "; color: var(--ok); }
+.step-current { font-weight: 600; }
+.step-current::marker { content: "▸  "; color: var(--accent); }
+.step-todo { color: var(--muted); }
+.checks { list-style: none; padding: 0; }
+.check-ok::before { content: "✓ "; color: var(--ok); }
+.check-warning::before { content: "! "; color: var(--warning); }
+.check-failed::before { content: "✗ "; color: var(--error); }
+.actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 16px; }
+.log-text { max-height: 360px; overflow: auto; padding: 12px; background: var(--surface);
+  border-radius: var(--radius); font-size: 0.8rem; white-space: pre-wrap; }

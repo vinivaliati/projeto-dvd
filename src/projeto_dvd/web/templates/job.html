@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}DVD de {{ view.job.folder }}{% endblock %}
+{% block content %}
+<a class="back" href="{{ url_for('jobs') }}">← Jobs</a>
+<h1>DVD de <span class="folder-name">{{ view.job.folder }}</span></h1>
+<p class="muted">{{ view.profile_name }} · job #{{ view.job.id }}</p>
+{% include "_job_status.html" %}
+<details class="log" hx-get="{{ url_for('job_log', job_id=view.job.id) }}"
+         hx-trigger="toggle once" hx-target="find .log-text" hx-swap="innerHTML">
+  <summary>Log (últimas 200 linhas)</summary>
+  <pre class="log-text">Carregando...</pre>
+  <button class="button secondary" type="button"
+          hx-get="{{ url_for('job_log', job_id=view.job.id) }}"
+          hx-target="previous .log-text" hx-swap="innerHTML">Atualizar log</button>
+</details>
+{% endblock %}

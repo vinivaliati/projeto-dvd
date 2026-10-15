@@ -1,5 +1,6 @@
 """Brazilian Portuguese formatting for the templates (Jinja filters)."""
 
+from datetime import datetime
 from pathlib import Path
 
 from projeto_dvd.library.probe import AudioTrack, Video
@@ -97,3 +98,28 @@ def probe_reason(error: str, path: Path) -> str:
 def _decimal(value: float) -> str:
     text = f"{value:.1f}" if value < 10 else f"{value:.0f}"
     return text.removesuffix(".0").replace(".", ",")
+
+
+def format_ago(value: datetime | None, now: datetime) -> str:
+    if value is None:
+        return "?"
+    minutes = int((now - value).total_seconds() // 60)
+    if minutes < 1:
+        return "agora"
+    if minutes < 60:
+        return f"há {minutes} min"
+    if minutes < 24 * 60:
+        return f"há {minutes // 60} h"
+    days = minutes // (24 * 60)
+    return f"há {days} dia{'s' if days != 1 else ''}"
+
+
+def format_remaining(seconds: float | None) -> str:
+    if seconds is None:
+        return "calculando..."
+    if seconds < 60:
+        return "menos de 1 min"
+    minutes = round(seconds / 60)
+    if minutes < 60:
+        return f"cerca de {minutes} min"
+    return f"cerca de {minutes // 60}h{minutes % 60:02d}"
