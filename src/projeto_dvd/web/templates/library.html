@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Biblioteca</h1>
+{% if folders %}
+<ul class="cards">
+  {% for folder in folders %}
+  <li>
+    <a class="card" href="{{ url_for('folder', name=folder.name | urlencode) }}">
+      <span class="card-title">
+        <span class="folder-name">{{ folder.name }}</span>
+        <span class="badge badge-{{ folder.status.name | lower }}">{{ folder.status }}</span>
+      </span>
+      <span class="muted numbers">
+        {{ folder.files | length }} vídeo{{ "s" if folder.files | length != 1 }} · {{ folder.size | size }}
+      </span>
+      <span class="muted numbers">
+        {% if folder.status.name in ("EMPTY", "NOT_SCANNED") %}escaneie para ver{% else %}{{ folder.duration | duration }}{% endif %}
+      </span>
+    </a>
+  </li>
+  {% endfor %}
+</ul>
+{% else %}
+<section class="help">
+  <h2>Nenhuma pasta encontrada</h2>
+  <p>Crie uma subpasta para cada disco dentro da pasta de entrada e confira o
+     <code>HOST_MEDIA_DIR</code> no arquivo <code>.env</code>. Exemplo:</p>
+  <pre>entrada\
+  Senhor dos Aneis\
+    A Sociedade do Anel.mkv
+    As Duas Torres.mkv
+  Friends T1\
+    S01E01.mkv</pre>
+</section>
+{% endif %}
+{% endblock %}
