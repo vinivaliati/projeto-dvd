@@ -46,7 +46,7 @@
     {% else %}
     {% set s = file.summary %}
     {% set external = file.video.subtitles %}
-    {% set images = (s.subtitles | selectattr("kind", "equalto", "imagem") | list | length) + (external | selectattr("image") | list | length) %}
+    {% set images = (s.subtitles | selectattr("kind", "equalto", "image") | list | length) + (external | selectattr("image") | list | length) %}
     {% set subtitle_count = (s.subtitles | length) + (external | length) %}
     <tr>
       <td>
@@ -54,10 +54,10 @@
           <summary>{{ name }}</summary>
           <ul class="tracks">
             {% for track in s.audio %}
-            <li>Áudio: {{ track.language }} {{ track.channels }} · {{ track.codec }}{% if track.title %} · {{ track.title }}{% endif %}{% if track.default %} · padrão{% endif %}{% if track.forced %} · forçada{% endif %}</li>
+            <li>Áudio: {{ track.language | language }} {{ track | channels }} · {{ track.codec }}{% if track.title %} · {{ track.title }}{% endif %}{% if track.default %} · padrão{% endif %}{% if track.forced %} · forçada{% endif %}</li>
             {% endfor %}
             {% for track in s.subtitles %}
-            <li>Legenda: {{ track.language }} · {{ track.kind }} · {{ track.codec }}{% if track.title %} · {{ track.title }}{% endif %}{% if track.default %} · padrão{% endif %}{% if track.forced %} · forçada{% endif %}</li>
+            <li>Legenda: {{ track.language | language }} · {{ track.kind | subtitle_kind }} · {{ track.codec }}{% if track.title %} · {{ track.title }}{% endif %}{% if track.default %} · padrão{% endif %}{% if track.forced %} · forçada{% endif %}</li>
             {% endfor %}
             {% for sub in external %}
             <li>Legenda externa: {{ sub.language or "não definido" }} · {{ "imagem" if sub.image else "texto" }} · {{ sub.name }}</li>
@@ -74,10 +74,10 @@
         {% if s.video %}{{ s.video | video_label }}{% set aspect = s.video.aspect | aspect %}{% if aspect %} · {{ aspect }}{% endif %}{% if s.video.hdr %} <span class="badge badge-warnings">HDR</span>{% endif %}{% else %}sem vídeo{% endif %}
       </td>
       <td>
-        {% if s.audio %}{{ s.audio | length }} faixa{{ "s" if s.audio | length != 1 }}: {% for track in s.audio %}{{ track.language }} {{ track.channels }}{{ ", " if not loop.last }}{% endfor %}{% else %}nenhum{% endif %}
+        {% if s.audio %}{{ s.audio | length }} faixa{{ "s" if s.audio | length != 1 }}: {% for track in s.audio %}{{ track.language | language }} {{ track | channels }}{{ ", " if not loop.last }}{% endfor %}{% else %}nenhum{% endif %}
       </td>
       <td class="numbers">{{ subtitle_count }}{% if images %} ({{ images }} {{ "imagem" if images == 1 else "imagens" }}){% endif %}</td>
-      <td class="numbers">{{ s.chapters }}</td>
+      <td class="numbers">{{ s.chapters | length }}</td>
       <td>{% if file.warnings %}<span class="warning-icon" aria-hidden="true" title="{{ file.warnings | join(', ') }}">&#x26A0;&#xFE0E;</span><span class="sr-only">{{ file.warnings | join(', ') }}</span>{% endif %}</td>
     </tr>
     {% endif %}

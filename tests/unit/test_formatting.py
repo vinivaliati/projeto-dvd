@@ -4,14 +4,17 @@ import pytest
 
 from projeto_dvd.api.formatting import (
     format_aspect,
+    format_channels,
     format_duration,
     format_fps,
+    format_language,
     format_size,
+    format_subtitle_kind,
     last_line,
     probe_reason,
     video_label,
 )
-from projeto_dvd.library.probe import Video
+from projeto_dvd.library.probe import AudioTrack, Video
 
 
 def test_last_line() -> None:
@@ -80,13 +83,18 @@ def test_format_aspect_hides_16_9(ratio: float | None, text: str | None) -> None
 
 def make_video(codec: str, width: int, height: int, fps: float | None = 24.0) -> Video:
     return Video(
+        index=0,
         codec=codec,
         width=width,
         height=height,
         fps=fps,
+        r_frame_rate=None,
+        avg_frame_rate=None,
+        field_order=None,
         aspect=None,
         hdr=False,
         dolby_vision_5=False,
+        start_time=0.0,
     )
 
 
@@ -105,3 +113,41 @@ def make_video(codec: str, width: int, height: int, fps: float | None = 24.0) ->
 )
 def test_video_label(video: Video, text: str) -> None:
     assert video_label(video) == text
+
+
+def audio(layout: str | None = None, count: int | None = None) -> AudioTrack:
+    return AudioTrack(
+        index=1, language=None, codec="ac3", channel_count=count, channel_layout=layout,
+        sample_rate=48000, bit_rate=None, start_time=0.0, title=None, default=False, forced=False,
+    )  # fmt: skip
+
+
+@pytest.mark.parametrize(
+    ("layout", "count", "label"),
+    [
+        ("stereo", 2, "estéreo"),
+        ("5.1(side)", 6, "5.1"),
+        ("7.1", 8, "7.1"),
+        ("quad", 4, "quad"),
+        (None, 1, "mono"),
+        (None, 2, "estéreo"),
+        (None, 6, "5.1"),
+        (None, 8, "7.1"),
+        (None, 3, "3 canais"),
+        (None, None, "?"),
+    ],
+)
+def test_channels_label(layout: str | None, count: int | None, label: str) -> None:
+    assert format_channels(audio(layout, count)) == label
+
+
+def test_language_label() -> None:
+    assert format_language("por") == "por"
+    assert format_language(None) == "não definido"
+
+
+@pytest.mark.parametrize(
+    ("kind", "label"), [("text", "texto"), ("image", "imagem"), ("unknown", "desconhecido")]
+)
+def test_subtitle_kind_label(kind: str, label: str) -> None:
+    assert format_subtitle_kind(kind) == label

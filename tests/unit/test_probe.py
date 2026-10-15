@@ -1,5 +1,6 @@
 import json
 import subprocess
+from fractions import Fraction
 from pathlib import Path
 from typing import Any
 
@@ -10,7 +11,6 @@ from projeto_dvd.library.probe import (
     DOLBY_VISION_5,
     HDR,
     NO_VIDEO,
-    UNDEFINED_LANGUAGE,
     AudioTrack,
     FfprobeMissingError,
     ProbeResult,
@@ -142,14 +142,34 @@ def test_movie_summary() -> None:
     assert summary.video.fps == pytest.approx(23.976, abs=0.001)
     assert summary.video.aspect == pytest.approx(2.4)
     assert summary.video.hdr is False
+    assert summary.video.index == 0
+    assert summary.video.r_frame_rate == Fraction(24000, 1001)
+    assert summary.video.avg_frame_rate == Fraction(24000, 1001)
+    assert summary.video.field_order == "progressive"
+    assert summary.video.start_time == 0.0
     assert summary.audio == (
         AudioTrack(
-            language="por", channels="5.1", codec="ac3", title=None, default=False, forced=False
+            index=1,
+            language="por",
+            codec="ac3",
+            channel_count=6,
+            channel_layout="5.1(side)",
+            sample_rate=48000,
+            bit_rate=448000,
+            start_time=-0.005,
+            title=None,
+            default=False,
+            forced=False,
         ),
         AudioTrack(
+            index=2,
             language="eng",
-            channels="estéreo",
             codec="aac",
+            channel_count=2,
+            channel_layout="stereo",
+            sample_rate=48000,
+            bit_rate=None,
+            start_time=-0.021,
             title="Comentario",
             default=False,
             forced=False,
@@ -157,10 +177,11 @@ def test_movie_summary() -> None:
     )
     assert summary.subtitles == (
         SubtitleTrack(
-            language="por", kind="texto", codec="subrip", title=None, default=False, forced=True
+            index=3, language="por", kind="text", codec="subrip", title=None, default=False,
+            forced=True,
         ),
-    )
-    assert summary.chapters == 2
+    )  # fmt: skip
+    assert summary.chapters == (0.0, 2.0)
     assert summary.warnings == ()
 
 
@@ -169,8 +190,8 @@ def test_cover_art_is_not_the_video_track() -> None:
 
     assert summary.video is not None
     assert (summary.video.codec, summary.video.width) == ("h264", 1280)
-    assert summary.audio[0].language == UNDEFINED_LANGUAGE  # "und" in the file
-    assert summary.audio[0].channels == "mono"
+    assert summary.audio[0].language is None  # "und" in the file
+    assert summary.audio[0].channel_layout == "mono"
 
 
 def test_cover_only_means_no_video() -> None:
@@ -203,11 +224,12 @@ def test_dvd_mpeg2() -> None:
     assert summary.video.codec == "mpeg2video"
     assert summary.video.fps == pytest.approx(29.97, abs=0.001)
     assert summary.video.aspect == pytest.approx(16 / 9)
-    assert summary.audio[0].language == UNDEFINED_LANGUAGE  # no tag at all
-    assert summary.audio[0].channels == "estéreo"
+    assert summary.audio[0].language is None  # no tag at all
+    assert summary.audio[0].channel_count == 2
+    assert summary.audio[0].bit_rate == 192000
     assert len(summary.audio) == 1  # the dvd_nav_packet data stream is ignored
     assert summary.subtitles[0].codec == "dvd_subtitle"
-    assert summary.subtitles[0].kind == "imagem"
+    assert summary.subtitles[0].kind == "image"
 
 
 def test_dolby_vision_profile_5_with_pgs() -> None:
@@ -217,9 +239,9 @@ def test_dolby_vision_profile_5_with_pgs() -> None:
     assert summary.video.hdr is True
     assert summary.video.dolby_vision_5 is True
     assert summary.warnings == (HDR, DOLBY_VISION_5, ABOVE_1080P)
-    assert summary.audio[0].channels == "7.1"
+    assert summary.audio[0].channel_layout == "7.1"
     assert summary.audio[0].default is True
-    assert summary.subtitles[0].kind == "imagem"
+    assert summary.subtitles[0].kind == "image"
     assert summary.subtitles[0].title == "Brazilian"
 
 
@@ -235,7 +257,7 @@ def test_missing_values_do_not_break_the_summary() -> None:
     assert summary.video is not None
     assert summary.video.fps is None
     assert summary.video.aspect == pytest.approx(16 / 9)  # from the resolution
-    assert summary.chapters == 0
+    assert summary.chapters == ()
 
 
 def test_fps_falls_back_to_r_frame_rate() -> None:
@@ -267,35 +289,41 @@ def test_garbage_values_are_unknown() -> None:
     assert summary.video.aspect is None
 
 
-@pytest.mark.parametrize(
-    ("fields", "label"),
-    [
-        ({"channel_layout": "5.1(side)", "channels": 6}, "5.1"),
-        ({"channel_layout": "stereo", "channels": 2}, "estéreo"),
-        ({"channel_layout": "quad", "channels": 4}, "quad"),
-        ({"channels": 1}, "mono"),
-        ({"channels": 2}, "estéreo"),
-        ({"channels": 6}, "5.1"),
-        ({"channels": 8}, "7.1"),
-        ({"channels": 3}, "3 canais"),
-        ({}, "?"),
-    ],
-)
-def test_channel_labels(fields: dict[str, Any], label: str) -> None:
-    summary = summarize(probe_data(video_stream(), {"codec_type": "audio", **fields}))
+def test_channel_values_are_raw() -> None:
+    track = {"codec_type": "audio", "channels": 6, "channel_layout": "5.1(side)"}
+    other = {"codec_type": "audio", "channels": "x"}
 
-    assert summary.audio[0].channels == label
+    first, second = summarize(probe_data(video_stream(), track, other)).audio
+
+    assert (first.channel_count, first.channel_layout) == (6, "5.1(side)")
+    assert (second.channel_count, second.channel_layout) == (None, None)
+
+
+def test_invalid_numbers_become_none() -> None:
+    track = {"codec_type": "audio", "sample_rate": "abc", "bit_rate": "N/A"}
+
+    audio = summarize(probe_data(video_stream(), track)).audio[0]
+
+    assert (audio.sample_rate, audio.bit_rate, audio.start_time) == (None, None, 0.0)
+
+
+def test_invalid_rates_become_none() -> None:
+    data = probe_data(video_stream(avg_frame_rate="0/0", r_frame_rate="abc"))
+
+    video = summarize(data).video
+    assert video is not None
+    assert (video.r_frame_rate, video.avg_frame_rate, video.fps) == (None, None, None)
 
 
 @pytest.mark.parametrize(
     ("tags", "language"),
     [
         ({"language": "por"}, "por"),
-        ({"language": "und"}, UNDEFINED_LANGUAGE),
-        ({}, UNDEFINED_LANGUAGE),
+        ({"language": "und"}, None),
+        ({}, None),
     ],
 )
-def test_language(tags: dict[str, str], language: str) -> None:
+def test_language(tags: dict[str, str], language: str | None) -> None:
     summary = summarize(probe_data(video_stream(), {"codec_type": "audio", "tags": tags}))
 
     assert summary.audio[0].language == language
@@ -304,16 +332,16 @@ def test_language(tags: dict[str, str], language: str) -> None:
 @pytest.mark.parametrize(
     ("codec", "kind"),
     [
-        ("subrip", "texto"),
-        ("ass", "texto"),
-        ("ssa", "texto"),
-        ("mov_text", "texto"),
-        ("webvtt", "texto"),
-        ("hdmv_pgs_subtitle", "imagem"),
-        ("dvd_subtitle", "imagem"),
-        ("dvb_subtitle", "imagem"),
-        ("xsub", "imagem"),
-        ("eia_608", "desconhecido"),
+        ("subrip", "text"),
+        ("ass", "text"),
+        ("ssa", "text"),
+        ("mov_text", "text"),
+        ("webvtt", "text"),
+        ("hdmv_pgs_subtitle", "image"),
+        ("dvd_subtitle", "image"),
+        ("dvb_subtitle", "image"),
+        ("xsub", "image"),
+        ("eia_608", "unknown"),
     ],
 )
 def test_subtitle_kind(codec: str, kind: str) -> None:
@@ -338,3 +366,12 @@ def test_no_streams_at_all() -> None:
     assert summary.video is None
     assert summary.audio == ()
     assert summary.warnings == (NO_VIDEO,)
+
+
+def test_stream_index_and_dvd_start_time() -> None:
+    summary = summarize(fixture("dvd"))
+
+    assert summary.video is not None
+    assert summary.video.index == 1
+    assert summary.video.start_time == pytest.approx(0.533, abs=0.01)
+    assert summary.audio[0].index == 2

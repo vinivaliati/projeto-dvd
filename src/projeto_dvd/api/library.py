@@ -12,9 +12,12 @@ from sqlmodel import Session
 
 from projeto_dvd.api.formatting import (
     format_aspect,
+    format_channels,
     format_duration,
     format_fps,
+    format_language,
     format_size,
+    format_subtitle_kind,
     probe_reason,
     video_label,
 )
@@ -34,6 +37,9 @@ templates.env.filters.update(
     aspect=format_aspect,
     video_label=video_label,
     probe_reason=probe_reason,
+    language=format_language,
+    channels=format_channels,
+    subtitle_kind=format_subtitle_kind,
 )
 
 # One scan at a time (per process; the app runs a single uvicorn worker): ffprobe is heavy

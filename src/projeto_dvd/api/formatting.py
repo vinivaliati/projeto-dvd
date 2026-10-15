@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from projeto_dvd.library.probe import Video
+from projeto_dvd.library.probe import AudioTrack, Video
 
 VIDEO_CODECS = {
     "h264": "H.264",
@@ -13,6 +13,16 @@ VIDEO_CODECS = {
     "vc1": "VC-1",
 }
 SIXTEEN_NINE = 16 / 9
+UNDEFINED_LANGUAGE = "não definido"
+CHANNEL_LAYOUTS = {
+    "mono": "mono",
+    "stereo": "estéreo",
+    "5.1": "5.1",
+    "5.1(side)": "5.1",
+    "7.1": "7.1",
+}
+CHANNEL_COUNTS = {1: "mono", 2: "estéreo", 6: "5.1", 8: "7.1"}
+SUBTITLE_KINDS = {"text": "texto", "image": "imagem", "unknown": "desconhecido"}
 
 
 def format_size(size: int) -> str:
@@ -55,6 +65,22 @@ def _resolution(width: int, height: int) -> str:
     if width > 1920 or height > 1080 or width < 1280:
         return f"{width}x{height}"
     return "1080p" if width > 1280 or height > 720 else "720p"
+
+
+def format_language(language: str | None) -> str:
+    return language or UNDEFINED_LANGUAGE
+
+
+def format_channels(track: AudioTrack) -> str:
+    if track.channel_layout:
+        return CHANNEL_LAYOUTS.get(track.channel_layout, track.channel_layout)
+    if track.channel_count is not None:
+        return CHANNEL_COUNTS.get(track.channel_count, f"{track.channel_count} canais")
+    return "?"
+
+
+def format_subtitle_kind(kind: str) -> str:
+    return SUBTITLE_KINDS.get(kind, kind)
 
 
 def last_line(text: str) -> str:
