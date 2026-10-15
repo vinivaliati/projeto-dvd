@@ -37,6 +37,11 @@
     As Duas Torres.mkv
   Friends T1\
     S01E01.mkv</pre>
+  <p>Se a pasta de entrada fica no HD externo, confira se ele está conectado. O WSL não monta
+     sozinho um HD ligado depois que ele subiu: reinicie com <code>wsl --shutdown</code> no
+     Windows e depois <code>make dev</code>.</p>
+  <p>Use um arquivo de vídeo por título (por exemplo, um .mkv do MakeMKV). Pastas de disco
+     copiadas (VIDEO_TS ou BDMV) não são suportadas.</p>
 </section>
 {% endif %}
 {% endblock %}

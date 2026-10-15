@@ -129,6 +129,8 @@ def test_library_without_folders_shows_help(tmp_path: Path, database_url: str) -
 
     assert response.status_code == 200
     assert "HOST_MEDIA_DIR" in response.text
+    assert "HD externo" in response.text  # a drive connected late is a common cause
+    assert "VIDEO_TS" in response.text  # disc folders are not read: one video file per title
 
 
 def test_empty_folder_card_does_not_ask_for_a_scan(tmp_path: Path, database_url: str) -> None:
@@ -381,6 +383,7 @@ def test_folders_without_videos_are_empty(client: TestClient, media: Path, name:
     card = client.get("/").text.split(f">{name}<", 1)[1].split("</li>", 1)[0]
 
     assert "Nenhum vídeo nesta pasta." in page
+    assert "VIDEO_TS" in page  # a copied DVD folder lands here: say why
     assert "<table" not in page
     assert "badge-empty" in card
 

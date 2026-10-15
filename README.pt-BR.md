@@ -46,6 +46,9 @@ entrada\                          (HOST_MEDIA_DIR, montada em /media, somente le
   combinam, ganha o nome mais longo (`Filme.2.pt.srt` → `Filme.2.mkv`).
 - Vídeos soltos direto na pasta de entrada, fora de uma pasta de disco, não aparecem. Links
   simbólicos são ignorados.
+- Use um arquivo de vídeo por título (por exemplo, um `.mkv` feito com o MakeMKV). Pastas de disco
+  copiadas (`VIDEO_TS`, `BDMV`) não são suportadas: os `.VOB` ficam de fora e um `BDMV` completo
+  listaria todos os clipes.
 - O scan é incremental: um arquivo só é lido de novo quando o tamanho ou a data de modificação
   mudam.
 - A pasta de entrada pode ficar no `C:` ou no próprio HD externo. Copiar para o `C:` ocupa

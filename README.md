@@ -47,6 +47,9 @@ entrada\                          (HOST_MEDIA_DIR, mounted read-only at /media)
   several match, the longest name wins (`Movie.2.pt.srt` → `Movie.2.mkv`).
 - Videos placed directly in the input folder, outside a disc folder, are not listed. Symbolic
   links are ignored.
+- Use one video file per title (for example an `.mkv` made with MakeMKV). Copied disc folders
+  (`VIDEO_TS`, `BDMV`) are not supported: their `.VOB` files are skipped and a full `BDMV` would list
+  every clip.
 - Rescans are incremental: a file is read again only when its size or modification time
   changes.
 - The input folder can be on `C:` or on the external drive itself. Copying to `C:` takes space

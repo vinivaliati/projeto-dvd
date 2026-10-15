@@ -14,7 +14,8 @@
 <p class="banner banner-warning">{{ folder.warning_count }} arquivo{{ "s" if folder.warning_count != 1 }} com aviso</p>
 {% endif %}
 {% if folder.status.name == "EMPTY" %}
-<p class="empty">Nenhum vídeo nesta pasta.</p>
+<p class="empty">Nenhum vídeo nesta pasta. Pastas de DVD copiadas (VIDEO_TS) não são lidas:
+   use um arquivo de vídeo por título, por exemplo um .mkv do MakeMKV.</p>
 {% elif folder.status.name == "NOT_SCANNED" %}
 <p class="empty">Esta pasta ainda não foi escaneada. O scan lê os dados técnicos de cada vídeo
    com o ffprobe, sem alterar os arquivos. Use o botão Escanear acima.</p>
