@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Biblioteca</h1>
+{% if folders %}
+<ul class="cards">
+  {% for folder in folders %}
+  <li>
+    <a class="card" href="{{ url_for('folder', name=folder.name | urlencode) }}">
+      <span class="card-title">
+        <span class="folder-name">{{ folder.name }}</span>
+        {% if scanning == folder.name %}
+        <span class="badge">escaneando</span>
+        {% else %}
+        <span class="badge badge-{{ folder.status.name | lower }}">{{ folder.status }}</span>
+        {% endif %}
+      </span>
+      <span class="muted numbers">
+        {{ folder.files | length }} vídeo{{ "s" if folder.files | length != 1 }} · {{ folder.size | size }}
+      </span>
+      {% if folder.status.name == "NOT_SCANNED" %}
+      <span class="muted">escaneie para ver</span>
+      {% elif folder.status.name != "EMPTY" %}
+      <span class="muted numbers">{{ folder.duration | duration }}</span>
+      {% endif %}
+    </a>
+  </li>
+  {% endfor %}
+</ul>
+{% else %}
+<section class="help">
+  <h2>Nenhuma pasta encontrada</h2>
+  <p>Crie uma subpasta para cada disco dentro da pasta de entrada e confira o
+     <code>HOST_MEDIA_DIR</code> no arquivo <code>.env</code>. Exemplo:</p>
+  <pre>entrada\
+  Senhor dos Aneis\
+    A Sociedade do Anel.mkv
+    As Duas Torres.mkv
+  Friends T1\
+    S01E01.mkv</pre>
+  <p>Se a pasta de entrada fica no HD externo, confira se ele está conectado. O WSL não monta
+     sozinho um HD ligado depois que ele subiu: reinicie com <code>wsl --shutdown</code> no
+     Windows e depois <code>make dev</code>.</p>
+  <p>Use um arquivo de vídeo por título (por exemplo, um .mkv do MakeMKV). Pastas de disco
+     copiadas (VIDEO_TS ou BDMV) não são suportadas.</p>
+</section>
+{% endif %}
+{% endblock %}

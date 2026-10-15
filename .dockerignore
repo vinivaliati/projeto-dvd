@@ -1,8 +1,9 @@
 # Allowlist: only what the image needs. Keeps .env, media files and caches out of the
-# build context by default.
+# build context by default. tests/ is used only by the "test" stage.
 *
 !pyproject.toml
 !uv.lock
 !README.md
 !src
+!tests
 **/__pycache__

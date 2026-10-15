@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}{{ folder.name }}{% endblock %}
+{% block content %}
+<a class="back" href="{{ url_for('library') }}">← Biblioteca</a>
+<header class="folder-header">
+  <h1 class="folder-name">{{ folder.name }}</h1>
+  <button class="primary" type="button"
+          hx-post="{{ url_for('scan_folder', name=folder.name | urlencode) }}"
+          hx-target="#folder-body" hx-swap="innerHTML"
+          hx-disabled-elt="this" hx-sync="this:drop"
+          hx-indicator="#folder-body, #scanning"
+          hx-on::before-request="document.getElementById('scan-failed').hidden = true"
+          hx-on::response-error="document.getElementById('scan-failed').hidden = false"
+          hx-on::send-error="document.getElementById('scan-failed').hidden = false">Escanear</button>
+  <span id="scanning" class="scanning" role="status">Escaneando... (pode levar alguns minutos)</span>
+</header>
+{# HTMX 2 does not swap error responses, so a failed scan would otherwise go unnoticed. #}
+<p id="scan-failed" class="banner banner-error" role="alert" hidden>O scan falhou (a pasta pode ter
+   sido renomeada ou removida, ou o app parou). Recarregue a página e tente de novo.</p>
+<div id="folder-body">
+  {% include "_folder_body.html" %}
+</div>
+{% endblock %}

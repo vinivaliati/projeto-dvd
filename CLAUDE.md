@@ -99,12 +99,16 @@ Uma tarefa só está pronta quando:
 ## 3. Funcionalidades
 
 ### 3.1 Biblioteca
-- Configurar uma ou mais pastas de origem (o HD externo).
-- Escanear recursivamente os arquivos de vídeo (`.mkv`, `.mp4`, `.avi`, `.m4v`, `.ts`...).
-- Ler com `ffprobe`: duração, resolução, fps, codec, HDR, faixas de áudio (idioma, canais,
-  codec), legendas (idioma, tipo: texto ou bitmap), capítulos.
-- Detectar legendas externas (`.srt`, `.ass`, `.sub/.idx`) ao lado do arquivo.
-- Rescan incremental (pelo caminho + tamanho + data de modificação), sem reprocessar tudo.
+- Uma pasta de entrada (`HOST_MEDIA_DIR`) com **uma subpasta por disco** (ex: "Senhor dos Aneis"
+  com os três filmes). O app não varre o HD inteiro; subpastas dentro da pasta do disco valem.
+- Escanear recursivamente os vídeos da pasta do disco (`.mkv`, `.mp4`, `.m4v`, `.avi`, `.mov`,
+  `.ts`, `.m2ts`), ignorando links simbólicos.
+- Ler com `ffprobe`: duração, resolução, fps, codec, HDR (inclusive Dolby Vision, com aviso
+  próprio para o perfil 5), faixas de áudio (idioma, canais, codec), legendas (idioma, tipo:
+  texto ou imagem), capítulos.
+- Detectar legendas externas (`.srt`, `.ass`, `.ssa`, `.sup`, `.idx` com o seu `.sub`) ao lado do
+  vídeo.
+- Rescan incremental por `(caminho, tamanho, mtime_ns)`, sem reprocessar tudo.
 
 ### 3.2 Curadoria
 - Sugerir automaticamente filme, série, temporada e episódio pelo nome do arquivo
@@ -233,7 +237,8 @@ validado com teste antes de virar padrão.
   O spike termina com uma decisão registrada no Log de decisões.
 
 ### 5.3 Armazenamento e performance no WSL
-- O HD externo aparece no WSL em `/mnt/<letra>/...` e é montado no Docker como **somente leitura**.
+- O HD externo aparece no WSL em `/mnt/<letra>/...`. A pasta de entrada pode ficar no `C:` ou no
+  próprio HD externo, e é montada no Docker como **somente leitura** (`/media:ro`).
 - Ler do `/mnt` é mais lento, mas serve para o encode. Os **intermediários** ficam no sistema de
   arquivos do WSL (ext4), que é bem mais rápido.
 - O `.iso` final e os PDFs vão para uma pasta no lado do Windows (ex:
@@ -246,10 +251,10 @@ validado com teste antes de virar padrão.
 | Camada | Escolha |
 |---|---|
 | Linguagem | Python 3.12, gerenciado com **uv** |
-| Qualidade | **ruff** (lint e format), **mypy** (strict nos módulos novos), **pytest** + pytest-cov |
+| Qualidade | **ruff** (lint e format), **mypy** (strict no projeto todo), **pytest** + pytest-cov |
 | API | **FastAPI** + **Pydantic** v2 |
 | Banco | **SQLite** com **SQLModel**; migrações com **Alembic** |
-| Frontend | **Jinja2 + HTMX + Tailwind** (sem build pesado; reavaliar se o editor de menu precisar de mais interatividade) |
+| Frontend | **Jinja2 + HTMX + CSS próprio** (sem build; reavaliar no editor de menus, Fase 4) |
 | Jobs | tabela `jobs` no SQLite + processo worker separado. Sem Celery/Redis a menos que fique necessário |
 | Mídia | `ffmpeg`/`ffprobe`, `dvdauthor`, `spumux`, `tsMuxeR`, `xorriso` (`genisoimage` entra na Fase 3) |
 | Imagens e PDF | **Pillow** para menus e artes; **reportlab** para o PDF de impressão |
@@ -260,7 +265,7 @@ validado com teste antes de virar padrão.
 
 Variáveis do **compose** (caminhos no host, WSL), existentes desde a Fase 0:
 ```
-HOST_MEDIA_DIR=/mnt/e/Filmes                        # montada em /media (ro)
+HOST_MEDIA_DIR=/mnt/c/Users/<usuario>/Videos/entrada   # uma subpasta por disco; /media (ro)
 HOST_WORK_DIR=/home/<usuario>/projeto-dvd-work      # montada em /work (ext4, nunca /mnt/c)
 HOST_OUTPUT_DIR=/mnt/c/Users/<usuario>/Videos/projeto-dvd   # montada em /output
 ```
@@ -268,10 +273,10 @@ As pastas precisam existir antes do `up` (o Docker cria as que faltam como root)
 
 Variáveis do **app** (caminhos dentro do container), entram quando forem usadas:
 ```
-MEDIA_ROOTS=/media              # Fase 1; pastas de origem, separadas por vírgula
-WORK_DIR=/work                  # Fase 1
-OUTPUT_DIR=/output              # Fase 1
-DATABASE_URL=sqlite:////data/projeto_dvd.db   # Fase 1
+MEDIA_DIR=/media                # Fase 1; a pasta de entrada (uma só)
+DATABASE_URL=sqlite:////data/projeto_dvd.db   # Fase 1; volume data
+WORK_DIR=/work                  # Fase 3
+OUTPUT_DIR=/output              # Fase 3
 TMDB_API_KEY=                   # Fase 2
 TMDB_LANGUAGE=pt-BR             # Fase 2
 DEFAULT_DVD_STANDARD=NTSC       # Fase 3
@@ -280,10 +285,13 @@ DEFAULT_DVD_STANDARD=NTSC       # Fase 3
 ### 6.2 Docker
 - `Dockerfile` com todas as ferramentas de mídia: base por digest, pacotes apt por versão,
   tsMuxeR e uv por checksum/digest. Usuário não root `app` (UID 1000).
-- `docker-compose.yml` com o serviço `web` (porta só em `127.0.0.1:8000`) e os volumes acima. O
+- Estágios `runtime` (a imagem do app, também o padrão de um `docker build .`) e `test` (runtime
+  + dependências de dev + `tests/`, para os testes `slow` com as ferramentas reais, sem rede).
+- `docker-compose.yml` com o serviço `web` (porta só em `127.0.0.1:8000`, `target: runtime`), os
+  volumes acima e o volume nomeado `data` (banco SQLite; `docker compose down -v` apaga). O
   serviço `worker` entra na Fase 3 (considerar `init: true` para recolher processos do ffmpeg).
-  O volume `data` entra na Fase 1.
-- `make dev`, `make test`, `make lint` e `make format` documentados no README.
+- `make dev`, `make test`, `make test-slow`, `make lint`, `make format` e `make fixtures`
+  documentados no README.
 
 ---
 
@@ -304,7 +312,9 @@ src/projeto_dvd/
   covers/         # layout de capa, lombada, verso, label, PDF
   jobs/           # fila, worker, progresso
   db/             # modelos SQLModel, sessão, migrações
+  app.py          # fábrica create_app (uvicorn --factory)
   config.py       # settings via pydantic-settings
+  tools.py        # versões das ferramentas de mídia (/health)
 tests/
   unit/
   integration/    # usam clipes curtos gerados com ffmpeg -f lavfi
@@ -321,8 +331,9 @@ docker/
 Em paralelo: `artes → composição da capa → PDF`.
 
 ### 7.1 Modelo de domínio
-- `SourceFolder`: pasta de origem configurada.
-- `MediaFile`: arquivo físico; caminho, tamanho, mtime, dados do ffprobe (JSON), faixas.
+- `MediaFile` (tabela `media_file`, Fase 1): arquivo físico; pasta do disco, caminho, tamanho,
+  `mtime_ns`, saída bruta do ffprobe (`probe_json`) ou o erro. Resumo, faixas e avisos são
+  calculados na hora a partir do JSON (sem tabelas de faixas e sem `SourceFolder` por enquanto).
 - `Title`: filme ou episódio; `tmdb_id`, tipo, temporada/episódio, nome, sinopse, duração; ligado a 1 `MediaFile`.
 - `Collection`: agrupamento (franquia ou temporada), com tema visual.
 - `DiscProject`: um disco; **perfil escolhido**, títulos em ordem, faixas selecionadas, capítulos, tema do menu, status.
@@ -332,7 +343,9 @@ Em paralelo: `artes → composição da capa → PDF`.
 - `CoverLayout`: escolhas de arte e texto de uma capa, e o PDF gerado.
 
 ### 7.2 Telas
-1. **Biblioteca**: lista de arquivos com status de match, filtros, botão de rescan.
+1. **Biblioteca** (Fase 1): um card por pasta de disco, com status (vazia, não escaneada, ok,
+   com avisos, mudou). A **tela da pasta** mostra a tabela dos vídeos e o botão Escanear. Status
+   de match e filtros entram na Fase 2.
 2. **Título**: dados técnicos, match TMDB (buscar/corrigir), artes.
 3. **Coleções**: criar, agrupar, definir tema.
 4. **Montador de disco**: títulos, **seletor de perfil**, calculadora, ordem, capítulos, áudio/legenda.
@@ -410,14 +423,19 @@ CLAUDE.md, inclusive a regra do travessão.
 
 Cada fase começa com `/superpowers:brainstorm` e um plano em `docs/plans/`.
 
+Ordem de execução: 1 → 3 → 2 → 4 → 5 → 6 → 7 → 8 (aprovada em 2026-10-15). Os números das fases
+não mudam; a Fase 3 vem antes da 2 para ter um disco de verdade o quanto antes.
+
 - [x] **Fase 0: Setup.** Estrutura do repo, `pyproject` com uv, ruff/mypy/pytest, `.gitignore`,
       `.env.example`, Dockerfile com as ferramentas de mídia, docker-compose, CI, README inicial,
       agentes em `.claude/agents/`. Pronto quando: `docker compose up` sobe a página "hello" e o
       CI fica verde.
-- [ ] **Fase 1: Biblioteca.** Pastas de origem, scan, ffprobe, catálogo, tela de biblioteca.
-- [ ] **Fase 2: Curadoria.** Parser de nomes, TMDB, correção manual, coleções, download de artes.
+- [ ] **Fase 1: Biblioteca.** Pasta de entrada com uma subpasta por disco, scan, ffprobe,
+      catálogo, tela de biblioteca e tela da pasta. (PR #3; marcar no merge.)
 - [ ] **Fase 3: DVD mínimo.** 1 filme → ISO sem menu, com perfil DVD-5/DVD-9 escolhido, que passa
-      no checklist e toca num player real.
+      no checklist. Pronto em duas etapas: agora, ISO validado no VLC; depois, o teste num player
+      físico, quando o gravador for comprado.
+- [ ] **Fase 2: Curadoria.** Parser de nomes, TMDB, correção manual, coleções, download de artes.
 - [ ] **Fase 4: Montador + menus DVD.** Vários títulos, episódios, calculadora com seletor de perfil,
       menus com tema, áudio/legenda, jobs com progresso.
 - [ ] **Fase 5: Capas.** Composição frente/lombada/verso, label, PDF.
@@ -431,12 +449,17 @@ Cada fase começa com `/superpowers:brainstorm` e um plano em `docs/plans/`.
 ## 13. Decisões em aberto
 
 - **Gravador e mídia:** o Vini ainda vai comprar. Recomendação: gravador de **Blu-ray**, que grava
-  DVD também. Para durabilidade, avaliar mídia **M-DISC** (existe em DVD e BD).
+  DVD também. Para durabilidade, avaliar mídia **M-DISC** (existe em DVD e BD). A segunda etapa
+  do pronto da Fase 3 (teste num player físico) depende dessa compra.
 - **Menus de Blu-ray:** resolver no spike da Fase 6.
 - **Soft pulldown no DVD** para fontes 23,976 fps: o ffmpeg não grava as flags RFF de forma
   confiável. Candidato para a Fase 3: `mpeg2enc` (pacote `mjpegtools`) ou pós-processamento.
-- **Checagem de escrita em `/work` e `/output`** no app (Fase 3): o Docker Desktop ignora
-  `create_host_path: false`, então uma pasta que falte vira root e o erro só aparece ao gravar.
+- **Checagem de escrita em `/work`, `/output` e `/data`** no app (Fase 3): o Docker Desktop ignora
+  `create_host_path: false`, então uma pasta que falte vira root e o erro só aparece ao gravar. O
+  volume `data` mantém o dono antigo se já existia ou se o `UID` da imagem mudar.
+- **Campos de mídia da Fase 3 no resumo do ffprobe** (`field_order`, `pix_fmt`, `sample_rate`,
+  `color_primaries`): precisam entrar no `Summary` para que os testes `slow` comparem as fixtures
+  também nesses campos.
 - **Medidas exatas das capas e do label:** confirmar com o material comprado.
 - **NTSC vs PAL:** padrão NTSC; confirmar com o player que vai ser usado.
 
@@ -452,7 +475,14 @@ _Atualizar ao fim de cada sessão._
   LICENSE e os 6 agentes. Cada task foi revisada pelos agentes antes do ok do Vini.
   `make lint` e `make test` verdes (30 testes, 100% de cobertura). PR #1 mergeado em
   `main` com CI verde (`quality` e `docker`). README também em português (`README.pt-BR.md`).
-  **Próximo passo:** Fase 1 (Biblioteca), começando por `/superpowers:brainstorm`.
+  Fase 0 concluída.
+- 2026-10-15: **Fase 1 implementada** na branch `feat/fase-1-biblioteca` (spec e plano em
+  `docs/plans/2026-10-14-fase-1-biblioteca*.md`). Biblioteca com um card por pasta de disco, tela
+  da pasta com a tabela dos vídeos, scan incremental com ffprobe, banco SQLite no volume `data`,
+  testes `slow` dentro da imagem e smoke do CI ampliado. Cada task revisada pelos agentes antes do
+  ok do Vini. `make lint`, `make test` (216 testes, 100% de cobertura) e `make test-slow` (7)
+  verdes. Revisão final da branch inteira: pronto para merge. PR #3 aberto; o merge é do Vini.
+  **Próximo passo:** Fase 3 (DVD mínimo), começando por `/superpowers:brainstorm`.
 - Os agentes de `.claude/agents/` só são reconhecidos pelo nome a partir de uma sessão nova; na
   sessão em que foram criados, rodam como agente genérico lendo o próprio arquivo.
 
@@ -488,3 +518,35 @@ _Atualizar ao fim de cada sessão._
   `tech-lead-midia`; entra no código nas Fases 3 e 6.
 - 2026-10-14 (Fase 0): licença MIT; `mypy --strict` no projeto todo; cobertura mínima de 90%;
   actions de terceiros no CI fixadas por SHA; `GITHUB_TOKEN` só leitura.
+- 2026-10-15 (Fase 1): fluxo de entrada com uma pasta `entrada` e **uma subpasta por disco**; o
+  app não varre o HD inteiro. `MEDIA_ROOTS` (lista) virou `MEDIA_DIR` (uma pasta); várias pastas
+  ficam para depois, se fizerem falta.
+- 2026-10-15 (Fase 1): a entrada pode ficar no `C:` ou no HD externo, sempre montada `ro`.
+- 2026-10-15 (Fase 1): modelo mínimo: só `media_file` com o JSON bruto do ffprobe; resumo, faixas
+  e avisos calculados na hora. Sem `SourceFolder` e sem tabelas de faixas (ajusta 7.1).
+- 2026-10-15 (Fase 1): biblioteca sem match e sem filtros até a Fase 2 (ajusta 7.2).
+- 2026-10-15 (Fase 1): scan síncrono com lock (um por vez, por processo, um worker do uvicorn),
+  sem fila; durante o scan as telas mostram "escaneando" em vez de "mudou". O resultado mostra
+  quantos arquivos o ffprobe leu ("Scan concluído: N arquivos lidos pelo ffprobe."). O HTMX 2 não
+  troca respostas de erro, então a tela da pasta tem um aviso próprio para scan que falhou.
+- 2026-10-15 (Fase 1): CSS próprio em vez de Tailwind (sem build; ajusta 6). HTMX 2.0.11
+  versionado no repositório, com sha256 no README.
+- 2026-10-15 (Fase 1): app criado pela fábrica `create_app(settings)`, com o uvicorn em
+  `--factory`; o Alembic roda no startup (só no `web` quando existir o `worker`).
+- 2026-10-15 (Fase 1): testes `slow` no estágio `test` da imagem, sem rede: comparam as fixtures
+  do ffprobe pelo resumo (não pelo JSON bruto, que muda com versões de encoder) e fazem um scan
+  de ponta a ponta. O CI confere a montagem `ro` do `/media` em `/proc/mounts`, porque um
+  `touch` que falha também passaria por simples falta de permissão.
+- 2026-10-15 (Fase 1): banco SQLite em volume nomeado (`data`), não em bind mount: o SQLite tem
+  problemas de lock em `/mnt/c`.
+- 2026-10-15 (Fase 1): HDR inclui Dolby Vision; perfil 5 com aviso próprio. A fixture DV5 é
+  escrita à mão: depois de atualizar o ffmpeg, conferir se o ffprobe ainda chama o side data de
+  "DOVI configuration record".
+- 2026-10-15 (Fase 1): `find_videos` conta uma vez só dois nomes iguais em NFC e NFD (fica com o
+  primeiro); antes, o segundo derrubava o scan com erro de banco.
+- 2026-10-15 (Fase 1): sem `TrustedHostMiddleware` e sem proteção CSRF por enquanto: o app é
+  local, a porta só abre em 127.0.0.1 e o scan só lê. Reavaliar quando houver ação que grava
+  (Fase 3).
+- 2026-10-15: roadmap reordenado para 1 → 3 → 2 → 4 → 5 → 6 → 7 → 8 (números mantidos), para ter
+  um disco de verdade antes da curadoria. A Fase 3 fica pronta em duas etapas: ISO validado no VLC
+  agora; teste num player físico quando o gravador for comprado (ver 13).

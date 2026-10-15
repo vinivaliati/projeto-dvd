@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-FROM python:3.12.15-slim-trixie@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1
+FROM python:3.12.15-slim-trixie@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1 AS runtime
 
 # Media toolchain. Versions are pinned on purpose: when Debian ships a security update the
 # build breaks, so every toolchain upgrade is a deliberate, reviewed commit.
@@ -25,7 +25,9 @@ COPY --from=ghcr.io/astral-sh/uv:0.13.1@sha256:4a1f3666816dafadd20ceb71eac9a7d56
 # Same UID/GID as the default WSL user, so files written to /work and /output belong to it.
 ARG UID=1000
 ARG GID=1000
-RUN groupadd --gid "${GID}" app && useradd --uid "${UID}" --gid "${GID}" --create-home app
+RUN groupadd --gid "${GID}" app && useradd --uid "${UID}" --gid "${GID}" --create-home app \
+    # The SQLite database lives in the "data" volume; a new volume copies this owner.
+    && mkdir /data && chown app:app /data
 
 WORKDIR /app
 ENV UV_COMPILE_BYTECODE=1 \
@@ -40,4 +42,16 @@ USER app
 EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --start-interval=2s --retries=3 \
     CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=4)"]
-CMD ["uvicorn", "projeto_dvd.app:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "projeto_dvd.app:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000"]
+
+# Test stage: the runtime image plus dev dependencies and the tests, for the slow tests
+# that need the real media toolchain. Never shipped.
+FROM runtime AS test
+USER root
+RUN uv sync --frozen
+COPY tests ./tests
+USER app
+CMD ["pytest", "-m", "slow", "--no-cov", "-p", "no:cacheprovider"]
+
+# The last stage is what a plain "docker build ." produces: keep it the runtime image.
+FROM runtime

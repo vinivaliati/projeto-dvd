@@ -18,6 +18,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       # Third-party action pinned by commit SHA (tags can be moved).
       - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
         with:
@@ -28,9 +30,11 @@ jobs:
 
   docker:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Compose refuses to start without host paths
         run: |
@@ -40,9 +44,13 @@ jobs:
           fi
           echo "$out" | grep -q "set HOST_MEDIA_DIR in .env"
 
+      - name: Integration tests inside the image (no network)
+        run: make test-slow
+
       - name: Create test environment
         run: |
-          mkdir -p /tmp/ci/media /tmp/ci/work /tmp/ci/output
+          mkdir -p "/tmp/ci/media/Disco Teste" /tmp/ci/work /tmp/ci/output
+          echo "not a video" > "/tmp/ci/media/Disco Teste/x.mkv"
           # The app runs as uid 1000 and the runner user is 1001: hand the folders over.
           sudo chown 1000:1000 /tmp/ci/work /tmp/ci/output
           printf 'HOST_MEDIA_DIR=/tmp/ci/media\nHOST_WORK_DIR=/tmp/ci/work\nHOST_OUTPUT_DIR=/tmp/ci/output\n' > .env
@@ -53,14 +61,22 @@ jobs:
       - name: Smoke test
         run: |
           curl -fsS http://127.0.0.1:8000/ -o index.html
-          grep -q "projeto-dvd" index.html
+          grep -q "Disco Teste" index.html
+          curl -fsS -X POST "http://127.0.0.1:8000/folders/Disco%20Teste/scan" -o scan.html
+          grep -q "Não foi possível ler o arquivo" scan.html
+          curl -fsS http://127.0.0.1:8000/static/app.css | grep -q -- "--accent"
           curl -fsS http://127.0.0.1:8000/health -o health.json
           cat health.json
           jq -e '.status == "ok" and ([.tools[]] | length == 6 and all(. != null))' health.json
           # Assign first: a failing command inside $(...) passed to test would not stop the step.
           uid="$(docker compose exec -T web id -u)"
           test "$uid" -ne 0
-          docker compose exec -T web touch /work/ci-check /output/ci-check
+          docker compose exec -T web touch /work/ci-check /output/ci-check /data/ci-check
+          # The input folder must be mounted read-only. Check the mount itself: a failing
+          # touch would also pass when only the folder permissions (runner uid 1001) block it.
+          media_options="$(docker compose exec -T web awk '$2 == "/media" { print $4 }' /proc/mounts)"
+          echo "/media mount options: $media_options"
+          echo "$media_options" | grep -qE '^ro(,|$)'
 
       - name: Show logs on failure
         if: failure()

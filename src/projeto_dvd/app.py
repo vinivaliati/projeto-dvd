@@ -1,28 +1,30 @@
-"""Web application: hello page and health check."""
+"""Web application factory."""
 
-from pathlib import Path
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, JSONResponse
-from fastapi.templating import Jinja2Templates
+from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 
-from projeto_dvd.tools import detect_versions
-
-app = FastAPI(title="projeto-dvd")
-templates = Jinja2Templates(directory=Path(__file__).parent / "web" / "templates")
-
-
-@app.get("/", response_class=HTMLResponse)
-def index(request: Request) -> HTMLResponse:
-    return templates.TemplateResponse(request, "index.html")
+from projeto_dvd.api import health, library
+from projeto_dvd.config import Settings
+from projeto_dvd.db.session import make_engine, migrate
 
 
-@app.get("/health")
-def health() -> JSONResponse:
-    """Report media tool versions; 503 if any tool is missing (the image is broken)."""
-    tools = detect_versions()
-    ok = all(tools.values())
-    return JSONResponse(
-        {"status": "ok" if ok else "missing", "tools": tools},
-        status_code=200 if ok else 503,
-    )
+def create_app(settings: Settings | None = None) -> FastAPI:
+    """Build the app. uvicorn calls it with --factory; tests pass their own settings."""
+    settings = settings or Settings()
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        migrate(settings.database_url)
+        yield
+        app.state.engine.dispose()
+
+    app = FastAPI(title="projeto-dvd", lifespan=lifespan)
+    app.state.settings = settings
+    app.state.engine = make_engine(settings.database_url)
+    app.mount("/static", StaticFiles(directory=library.WEB_DIR / "static"), name="static")
+    app.include_router(health.router)
+    app.include_router(library.router)
+    return app

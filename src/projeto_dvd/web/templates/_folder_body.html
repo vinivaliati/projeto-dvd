@@ -1,0 +1,88 @@
+<p class="muted numbers">
+  {{ folder.files | length }} vídeo{{ "s" if folder.files | length != 1 }} · {{ folder.size | size }}{% if folder.duration is not none %} · {{ folder.duration | duration }}{% endif %}
+</p>
+{% if scan_error %}<p class="banner banner-error">{{ scan_error }}</p>{% endif %}
+{% if probed is not none %}
+<p class="banner banner-ok">Scan concluído: {{ probed }} arquivo{{ "s" if probed != 1 }} lido{{ "s" if probed != 1 }} pelo ffprobe.</p>
+{% endif %}
+{% if scanning == folder.name %}
+<p class="banner">Um scan desta pasta está em andamento. Recarregue a página quando ele terminar.</p>
+{% elif folder.status.name == "CHANGED" %}
+<p class="banner banner-warning">Arquivos mudaram desde o último scan. Escaneie de novo.</p>
+{% endif %}
+{% if folder.warning_count %}
+<p class="banner banner-warning">{{ folder.warning_count }} arquivo{{ "s" if folder.warning_count != 1 }} com aviso</p>
+{% endif %}
+{% if folder.status.name == "EMPTY" %}
+<p class="empty">Nenhum vídeo nesta pasta. Pastas de DVD copiadas (VIDEO_TS) não são lidas:
+   use um arquivo de vídeo por título, por exemplo um .mkv do MakeMKV.</p>
+{% elif folder.status.name == "NOT_SCANNED" %}
+<p class="empty">Esta pasta ainda não foi escaneada. O scan lê os dados técnicos de cada vídeo
+   com o ffprobe, sem alterar os arquivos. Use o botão Escanear acima.</p>
+{% else %}
+<div class="table-wrap">
+<table class="files">
+  <thead>
+    <tr>
+      <th>Arquivo</th><th>Duração</th><th>Tamanho</th><th>Vídeo</th><th>Áudio</th>
+      <th>Leg.</th><th>Cap.</th><th><span class="sr-only">Avisos</span></th>
+    </tr>
+  </thead>
+  <tbody>
+  {% for file in folder.files %}
+    {% set name = file.video.path.split("/", 1)[1] %}
+    {% if file.error is not none %}
+    <tr class="row-error">
+      <td>{{ name }}</td>
+      <td colspan="7">Não foi possível ler o arquivo: {{ file.error | probe_reason(file.video.absolute) }}</td>
+    </tr>
+    {% elif file.summary is none %}
+    <tr>
+      <td>{{ name }}</td>
+      <td></td>
+      <td class="numbers">{{ file.video.size | size }}</td>
+      <td colspan="5" class="muted">ainda não escaneado</td>
+    </tr>
+    {% else %}
+    {% set s = file.summary %}
+    {% set external = file.video.subtitles %}
+    {% set images = (s.subtitles | selectattr("kind", "equalto", "imagem") | list | length) + (external | selectattr("image") | list | length) %}
+    {% set subtitle_count = (s.subtitles | length) + (external | length) %}
+    <tr>
+      <td>
+        <details>
+          <summary>{{ name }}</summary>
+          <ul class="tracks">
+            {% for track in s.audio %}
+            <li>Áudio: {{ track.language }} {{ track.channels }} · {{ track.codec }}{% if track.title %} · {{ track.title }}{% endif %}{% if track.default %} · padrão{% endif %}{% if track.forced %} · forçada{% endif %}</li>
+            {% endfor %}
+            {% for track in s.subtitles %}
+            <li>Legenda: {{ track.language }} · {{ track.kind }} · {{ track.codec }}{% if track.title %} · {{ track.title }}{% endif %}{% if track.default %} · padrão{% endif %}{% if track.forced %} · forçada{% endif %}</li>
+            {% endfor %}
+            {% for sub in external %}
+            <li>Legenda externa: {{ sub.language or "não definido" }} · {{ "imagem" if sub.image else "texto" }} · {{ sub.name }}</li>
+            {% endfor %}
+            {% for warning in file.warnings %}
+            <li class="warning-text"><span aria-hidden="true">&#x26A0;&#xFE0E;</span> {{ warning }}</li>
+            {% endfor %}
+          </ul>
+        </details>
+      </td>
+      <td class="numbers">{{ s.duration | duration }}</td>
+      <td class="numbers">{{ file.video.size | size }}</td>
+      <td class="numbers">
+        {% if s.video %}{{ s.video | video_label }}{% set aspect = s.video.aspect | aspect %}{% if aspect %} · {{ aspect }}{% endif %}{% if s.video.hdr %} <span class="badge badge-warnings">HDR</span>{% endif %}{% else %}sem vídeo{% endif %}
+      </td>
+      <td>
+        {% if s.audio %}{{ s.audio | length }} faixa{{ "s" if s.audio | length != 1 }}: {% for track in s.audio %}{{ track.language }} {{ track.channels }}{{ ", " if not loop.last }}{% endfor %}{% else %}nenhum{% endif %}
+      </td>
+      <td class="numbers">{{ subtitle_count }}{% if images %} ({{ images }} {{ "imagem" if images == 1 else "imagens" }}){% endif %}</td>
+      <td class="numbers">{{ s.chapters }}</td>
+      <td>{% if file.warnings %}<span class="warning-icon" aria-hidden="true" title="{{ file.warnings | join(', ') }}">&#x26A0;&#xFE0E;</span><span class="sr-only">{{ file.warnings | join(', ') }}</span>{% endif %}</td>
+    </tr>
+    {% endif %}
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endif %}
