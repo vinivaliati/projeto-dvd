@@ -91,6 +91,23 @@ def input_label(video: Video) -> str:
     return f"{_resolution(video.width, video.height)}, {format_fps(video.fps)} quadros/s"
 
 
+# Encode time per second of movie on a 6-core CPU, both passes (measured by the tech lead:
+# ~310 fps for 1080p H.264 sources, SD about twice as fast).
+ENCODE_SECONDS_PER_SECOND = {True: 0.2, False: 0.1}
+
+
+def format_encode_time(duration: float, hd: bool) -> str:
+    return format_remaining(duration * ENCODE_SECONDS_PER_SECOND[hd])
+
+
+def windows_path(host_dir: str, relative: str) -> str:
+    """/mnt/c/Users/x + iso/F.iso as C:\\Users\\x\\iso\\F.iso; other paths stay POSIX."""
+    parts = [part for part in host_dir.split("/") if part]
+    if len(parts) >= 2 and parts[0] == "mnt" and len(parts[1]) == 1:
+        return "\\".join([f"{parts[1].upper()}:", *parts[2:], *relative.split("/")])
+    return "/".join([host_dir.rstrip("/"), relative])
+
+
 def format_language(language: str | None) -> str:
     return language or UNDEFINED_LANGUAGE
 

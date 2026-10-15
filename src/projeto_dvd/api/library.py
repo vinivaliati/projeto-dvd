@@ -1,6 +1,7 @@
 """Library pages: disc folders, one folder's files, and the scan."""
 
 import threading
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
@@ -47,6 +48,7 @@ def folder_page(
         "probed": None,
         "scanning": _scanning,
         "dvd": dvd_state(session, view),
+        "now": datetime.now(UTC),
     }
     return templates.TemplateResponse(request, "folder.html", context)
 
@@ -78,5 +80,6 @@ def scan(
         "probed": probed,
         "scanning": _scanning,
         "dvd": dvd_state(session, view),
+        "now": datetime.now(UTC),
     }
     return templates.TemplateResponse(request, "_folder_body.html", context)

@@ -16,3 +16,5 @@ class Settings(BaseSettings):
     output_dir: Path = Path("/output")
     # Host names the app answers to (the port is published on 127.0.0.1 only).
     allowed_hosts: list[str] = ["localhost", "127.0.0.1"]
+    # The output folder as the host sees it (HOST_OUTPUT_DIR), only to show the ISO path.
+    host_output_dir: str | None = None

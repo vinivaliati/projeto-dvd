@@ -4,7 +4,7 @@
 <a class="back" href="{{ url_for('folder', name=source.folder | urlencode) }}">← {{ source.folder }}</a>
 <h1>Gerar DVD de <span class="folder-name">{{ source.folder }}</span></h1>
 <p class="muted">Entrada: {{ video | input_label }}, {{ source.summary.duration | duration }}</p>
-<p class="muted">Saída: DVD NTSC {{ shape.aspect }}{% if shape.height < 480 %} com faixas pretas (o filme é {{ video.aspect | aspect }}){% elif shape.width < 720 %} com faixas laterais{% endif %}. Leva cerca de 20 a 30 min.</p>
+<p class="muted">Saída: DVD NTSC {{ shape.aspect }}{% if shape.height < 480 %} com faixas pretas (o filme é {{ video.aspect | aspect }}){% elif shape.width < 720 %} com faixas laterais{% endif %}. A geração leva {{ source.summary.duration | encode_time(video.height > 576) }}.</p>
 {% if errors %}
 <div class="banner banner-error" role="alert"><ul>{% for error in errors %}<li>{{ error }}</li>{% endfor %}</ul></div>
 {% endif %}
@@ -18,7 +18,7 @@
     <div class="track">
       <label><input type="checkbox" name="audio" value="{{ track.index }}"{% if track.index in choices.audio %} checked{% endif %}{% if errors and "áudio" in errors | join %} aria-invalid="true"{% endif %}>
         {{ track.language | language }} · {{ track | channels }} · {{ track.codec | audio_codec }}{% if track.title %} · {{ track.title }}{% endif %}{% if track.default %} <span class="badge">padrão no arquivo</span>{% endif %}</label>
-      <span class="muted">{% if out.action == "copy" %}copiar sem perda{% else %}converter para Dolby Digital {{ "5.1" if out.channels == 6 else out.channels ~ " canais" if out.channels > 2 else "estéreo" if out.channels == 2 else "mono" }} ({{ out.kbps }} kbps){% endif %}</span>
+      <span class="muted">{% if out.action == "copy" %}copiar sem perda{% else %}converter para Dolby Digital {{ "5.1" if out.channels == 6 else out.channels ~ " canais" if out.channels > 2 else "estéreo" if out.channels == 2 else "mono" }} ({{ out.kbps }} kbps){% if track.codec == "ac3" %}, porque o original não segue o padrão do DVD{% endif %}{% endif %}</span>
       <label class="radio"><input type="radio" name="first_audio" value="{{ track.index }}"{% if track.index == choices.first_audio %} checked{% endif %}{% if errors and "toca ao colocar" in errors | join %} aria-invalid="true"{% endif %}> Toca ao colocar o disco</label>
     </div>
     {% endfor %}
@@ -47,7 +47,7 @@
   <fieldset>
     <legend>Capítulos</legend>
     <label class="radio"><input type="radio" name="chapters" value="file"{% if choices.chapters == "file" %} checked{% endif %}{% if source.summary.chapters | length < 2 %} disabled{% endif %}>
-      Do arquivo ({{ source.summary.chapters | length }}){% if source.summary.chapters | length < 2 %} <span class="muted">o arquivo não tem capítulos</span>{% endif %}</label>
+      Do arquivo{% if source.summary.chapters | length < 2 %} <span class="muted">(o arquivo não tem capítulos)</span>{% else %} ({{ source.summary.chapters | length }}){% endif %}</label>
     <label class="radio"><input type="radio" name="chapters" value="every"{% if choices.chapters == "every" %} checked{% endif %}>
       A cada <input type="number" name="minutes" min="1" max="60" value="{{ choices.minutes }}" class="minutes"{% if errors and "capítulos" in errors | join %} aria-invalid="true"{% endif %}> minutos</label>
     {% if chapters.note %}<p class="muted">{{ chapters.note }}</p>{% endif %}

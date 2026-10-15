@@ -15,6 +15,7 @@ from projeto_dvd.api.formatting import (
     format_audio_codec,
     format_channels,
     format_duration,
+    format_encode_time,
     format_fps,
     format_language,
     format_remaining,
@@ -44,6 +45,7 @@ templates.env.filters.update(
     remaining=format_remaining,
     audio_codec=format_audio_codec,
     input_label=input_label,
+    encode_time=format_encode_time,
 )
 
 

@@ -126,6 +126,7 @@ def test_folder_with_two_videos_explains(client: TestClient) -> None:
 
     assert "Não dá para gerar o DVD desta pasta" in body
     assert "vídeo só" in body
+    assert "coloque cada vídeo numa pasta própria" in body
 
 
 def test_unscanned_folder_asks_for_a_scan(client: TestClient) -> None:
@@ -339,3 +340,15 @@ def test_job_created_by_another_click_in_between(
                            follow_redirects=False)  # fmt: skip
 
     assert response.headers["location"] == "/jobs/7"
+
+
+def test_converted_ac3_explains_why(client: TestClient, probe_data: dict[str, object]) -> None:
+    streams = probe_data["streams"]
+    assert isinstance(streams, list)
+    streams[2]["bit_rate"] = "640000"
+    scan(client)
+
+    page = client.get("/folders/Filme/dvd").text
+
+    assert "porque o original não segue o padrão do DVD" in page
+    assert "A geração leva cerca de 24 min" in page

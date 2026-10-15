@@ -9,6 +9,8 @@ from projeto_dvd.planner.profiles import DiscProfile
 PACK_OVERHEAD_KBPS = 300  # pack, PES and nav headers inside the 10.08 Mbps mux
 SUBTITLE_PEAK_KBPS = 40
 SUBTITLE_AVERAGE_KBPS = 10
+# A target equal to maxrate turns the 2-pass VBR into CBR (no room for the hard scenes).
+VBR_HEADROOM = 0.95
 
 
 class Quality(StrEnum):
@@ -43,7 +45,7 @@ def estimate(
     other_kbps = sum(audio_kbps) + SUBTITLE_AVERAGE_KBPS * subtitles
     total_kbps = profile.usable_bytes * 8 / (1 + profile.mux_overhead) / duration / 1000
     maxrate = maxrate_kbps(profile, audio_kbps, subtitles)
-    video = int(min(total_kbps - other_kbps, maxrate))
+    video = int(min(total_kbps - other_kbps, VBR_HEADROOM * maxrate))
     size = (video + other_kbps) * 1000 * duration * (1 + profile.mux_overhead) / 8
     return Estimate(
         profile=profile,

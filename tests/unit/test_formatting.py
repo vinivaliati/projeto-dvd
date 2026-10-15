@@ -9,6 +9,7 @@ from projeto_dvd.api.formatting import (
     format_audio_codec,
     format_channels,
     format_duration,
+    format_encode_time,
     format_fps,
     format_language,
     format_remaining,
@@ -17,6 +18,7 @@ from projeto_dvd.api.formatting import (
     last_line,
     probe_reason,
     video_label,
+    windows_path,
 )
 from projeto_dvd.library.probe import AudioTrack, Video
 
@@ -190,3 +192,30 @@ def test_format_ago_without_a_date() -> None:
 )  # fmt: skip
 def test_audio_codec_label(codec: str, label: str) -> None:
     assert format_audio_codec(codec) == label
+
+
+@pytest.mark.parametrize(
+    ("host", "path"),
+    [
+        (
+            "/mnt/c/Users/vini/Videos/projeto-dvd",
+            "C:\\Users\\vini\\Videos\\projeto-dvd\\iso\\F.iso",
+        ),
+        ("/mnt/d/dvd/", "D:\\dvd\\iso\\F.iso"),
+        ("/home/vini/out", "/home/vini/out/iso/F.iso"),
+    ],
+)
+def test_output_path_for_windows(host: str, path: str) -> None:
+    assert windows_path(host, "iso/F.iso") == path
+
+
+@pytest.mark.parametrize(
+    ("seconds", "hd", "text"),
+    [
+        (7200, True, "cerca de 24 min"),
+        (7200, False, "cerca de 12 min"),
+        (40, True, "menos de 1 min"),
+    ],
+)
+def test_encode_time(seconds: float, hd: bool, text: str) -> None:
+    assert format_encode_time(seconds, hd) == text

@@ -5,13 +5,14 @@
 {% if jobs %}
 <div class="table-wrap">
 <table class="files">
-  <thead><tr><th>Pasta</th><th>Perfil</th><th>Status</th><th>Criado</th></tr></thead>
+  <thead><tr><th>#</th><th>Pasta</th><th>Perfil</th><th>Status</th><th>Criado</th></tr></thead>
   <tbody>
   {% for job, plan in jobs %}
     <tr>
+      <td class="numbers">#{{ job.id }}</td>
       <td><a class="folder-name" href="{{ url_for('job_page', job_id=job.id) }}">{{ job.folder }}</a></td>
       <td>{{ profiles[plan.profile].name }}</td>
-      <td>{{ {"queued": "na fila", "running": "gerando", "done": "pronto", "failed": "falhou", "canceled": "cancelado"}[job.status] }}{% if job.status == "running" %} · {{ (job.progress * 100) | int }}%{% endif %}</td>
+      <td><span class="badge{{ {'done': ' badge-ok', 'failed': ' badge-warnings', 'canceled': ' badge-warnings'}.get(job.status, '') }}">{{ {"queued": "na fila", "running": "gerando", "done": "pronto", "failed": "falhou", "canceled": "cancelado"}[job.status] }}{% if job.status == "running" %} · {{ (job.progress * 100) | int }}%{% endif %}</span></td>
       <td class="muted">{{ job.created_at | ago(now) }}</td>
     </tr>
   {% endfor %}

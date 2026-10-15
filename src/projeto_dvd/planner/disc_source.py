@@ -28,7 +28,7 @@ SCAN_FIRST = "Escaneie a pasta antes de gerar o disco."
 CHANGED = "Os arquivos mudaram desde o último scan. Escaneie de novo."
 ONE_VIDEO = (
     "Por enquanto o app gera disco com um vídeo só (discos com vários vídeos chegam com o "
-    "menu). Para gerar agora, deixe este vídeo sozinho numa pasta."
+    "menu). Para gerar agora, coloque cada vídeo numa pasta própria."
 )
 READ_ERROR = (
     "Não foi possível ler o arquivo. Escaneie de novo; se continuar, o arquivo pode estar "

@@ -3,7 +3,7 @@
   {% set p = item.profile %}
   {% set used = (item.size_bytes / p.capacity_bytes * 100) | round | int %}
   <label class="profile-card{% if choices.profile == p.key %} chosen{% endif %}">
-    <input type="radio" name="profile" value="{{ p.key }}"{% if choices.profile == p.key %} checked{% endif %}{% if item.quality == "Não cabe" %} disabled{% endif %}>
+    <input type="radio" id="profile-{{ p.key }}" name="profile" value="{{ p.key }}"{% if choices.profile == p.key %} checked{% endif %}{% if item.quality == "Não cabe" %} disabled{% endif %}>
     <span class="profile-name">{{ p.name }} · {{ p.description }}</span>
     {% if suggested == p.key %}<span class="badge">sugerido</span>{% endif %}
     <span class="quality quality-{{ {'Ótima': 'great', 'Aceitável': 'ok', 'Baixa': 'low', 'Não cabe': 'none'}[item.quality] }}">{{ item.quality }}</span>

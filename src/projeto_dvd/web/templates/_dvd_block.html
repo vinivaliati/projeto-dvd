@@ -12,7 +12,7 @@
   <a class="button primary" href="{{ url_for('dvd_form', name=folder.name | urlencode) }}">Gerar DVD</a>
   {% endif %}
   {% if dvd.last_done %}
-  <p class="muted">Último ISO: <a href="{{ url_for('job_page', job_id=dvd.last_done.id) }}">job #{{ dvd.last_done.id }}</a></p>
+  <p class="muted">Último ISO gerado {{ dvd.last_done.finished_at | ago(now) }} · <a href="{{ url_for('job_page', job_id=dvd.last_done.id) }}">ver o job #{{ dvd.last_done.id }}</a></p>
   {% endif %}
 </section>
 {% endif %}

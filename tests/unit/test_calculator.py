@@ -34,7 +34,9 @@ def test_maxrate_leaves_room_for_audio_and_subtitles() -> None:
 def test_short_movie_is_capped_at_maxrate() -> None:
     result = estimate(DVD9, 1800.0, [448], 0)
 
-    assert result.video_kbps == 9000
+    # 95% of the ceiling: b:v equal to maxrate turns the 2-pass VBR into CBR.
+    assert result.video_kbps == 8550
+    assert result.maxrate_kbps == 9000
     assert result.quality == Quality.GREAT
 
 

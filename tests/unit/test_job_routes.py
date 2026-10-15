@@ -175,3 +175,25 @@ def test_tiny_leftovers_do_not_offer_a_cleanup(client: TestClient, settings: Set
     make_file(job_dir(settings.work_dir, job_id) / "dvd.xml", b"<dvdauthor/>")
 
     assert "Apagar arquivos temporários" not in client.get(f"/jobs/{job_id}").text
+
+
+def test_done_job_shows_the_windows_path(tmp_path: Path, database_url: str) -> None:
+    settings = Settings(media_dir=tmp_path / "media", work_dir=tmp_path / "work",
+                        output_dir=tmp_path / "out", database_url=database_url,
+                        host_output_dir="/mnt/c/Users/vini/Videos/projeto-dvd")  # fmt: skip
+    with client_for(create_app(settings)) as client:
+        job_id = new_job(client)
+        engine = engine_of(client)
+        store.claim_next(engine)  # type: ignore[arg-type]
+        store.finish(engine, job_id, JobStatus.DONE, iso_path="/output/iso/Filme.iso")  # type: ignore[arg-type]
+
+        page = client.get(f"/jobs/{job_id}").text
+
+    assert "C:\\Users\\vini\\Videos\\projeto-dvd\\iso\\Filme.iso" in page
+    assert page.index("Antes de gravar") < page.index("Gravar no Windows")
+
+
+def test_job_list_shows_the_job_number(client: TestClient) -> None:
+    job_id = new_job(client)
+
+    assert f">#{job_id}<" in client.get("/jobs").text

@@ -1,61 +1,66 @@
 {% set job = view.job %}
-<section id="job-status" class="job-status" aria-live="polite"
+<section id="job-status" class="job-status"
   {% if view.active %}hx-get="{{ url_for('job_status', job_id=job.id) }}"
   hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
+  {% set current = view.steps | selectattr("state", "equalto", "current") | first %}
   {% if job.status == "queued" %}
     {% if view.queue_ahead %}
-    <p class="banner">Na fila. Começa quando o job #{{ view.queue_ahead.id }} (pasta {{ view.queue_ahead.folder }}) terminar.</p>
+    <p class="banner" role="status">Na fila. Começa quando o job #{{ view.queue_ahead.id }} (pasta {{ view.queue_ahead.folder }}) terminar.</p>
     {% elif view.waiting_worker %}
-    <p class="banner banner-warning">Aguardando o worker. Confira se o serviço está rodando
+    <p class="banner banner-warning" role="status">Aguardando o worker. Confira se o serviço está rodando
       (<code>docker compose ps</code>); para subir: <code>docker compose up -d worker</code>.</p>
     {% else %}
-    <p class="banner">Na fila.</p>
+    <p class="banner" role="status">Na fila.</p>
     {% endif %}
   {% elif job.status == "running" %}
-    <p class="progress-line"><progress max="100" value="{{ view.percent }}"></progress>
+    <p class="progress-line"><progress max="100" value="{{ view.percent }}" aria-label="Progresso da geração"></progress>
       <span class="numbers">{{ view.percent }}%</span></p>
+    {% if current %}<p role="status">Etapa atual: {{ current.label }}</p>{% endif %}
     <p class="muted">Começou {{ view.started | ago(view.now) }} · faltam {{ view.remaining_seconds | remaining }}</p>
     <p>Pode fechar esta página. A geração continua e você pode voltar pela lista de Jobs.</p>
   {% elif job.status == "done" %}
-    <p class="banner banner-ok"><strong>Pronto! O ISO passou na conferência automática.</strong></p>
-    <p>O ISO está na pasta de saída: <code>iso\{{ view.plan.iso_name }}</code>
-      {% if view.qa %}({{ view.qa.iso_bytes | size }}){% endif %}.</p>
-    <p class="muted">Para gravar no Windows: abra o ImgBurn, "Write image file to disc", escolha
-      o ISO e use velocidade baixa (4x ou 8x). Teste antes no VLC: Mídia, Abrir disco.</p>
+    <p class="banner banner-ok" role="status"><strong>Pronto! O ISO passou na conferência automática.</strong></p>
+    <p>O ISO está em: <code>{{ view.iso_display }}</code>{% if view.qa %} ({{ view.qa.iso_bytes | size }}){% endif %}.</p>
+    <h2>Antes de gravar, confira no VLC</h2>
+    <ol class="checklist">
+      <li>Abra o ISO no VLC (Mídia, Abrir disco, escolha o arquivo .iso).</li>
+      <li>O filme começa sozinho ao abrir o disco.</li>
+      <li>"Menu" e "Title" não travam nem tiram o filme do lugar.</li>
+      <li>Os capítulos pulam com "próximo".</li>
+      <li>Áudio e legenda trocam; a faixa e a legenda do início são as escolhidas.</li>
+      <li>Panorâmicas sem tranco nem pente; cores e faixas pretas corretas.</li>
+      <li>Legenda legível, em até 2 linhas.</li>
+      <li>Áudio sincronizado com a boca no começo, no meio e no fim.</li>
+      <li>No fim do filme o disco para, sem travar.</li>
+    </ol>
+    <h2>Gravar no Windows</h2>
+    <p>Abra o ImgBurn, escolha "Write image file to disc", selecione o ISO, use velocidade
+      baixa (4x ou 8x) e deixe marcado "Verify".</p>
   {% elif job.status == "canceled" %}
-    <p class="banner">Cancelado por você. Nada foi gravado na pasta de saída.</p>
+    <p class="banner" role="status">Cancelado por você. Nada foi gravado na pasta de saída.</p>
   {% else %}
-    <p class="banner banner-error">{{ job.error or "A geração falhou." }}</p>
+    <p class="banner banner-error" role="status">{{ job.error or "A geração falhou." }}</p>
   {% endif %}
 
+  {% if job.status != "done" %}
   <ol class="steps">
     {% for step in view.steps %}
     <li class="step step-{{ step.state }}">{{ step.label }}</li>
     {% endfor %}
   </ol>
-
-  {% if view.qa %}
-  <h2>Conferência automática</h2>
-  <ul class="checks">
-    {% for check in view.qa.checks %}
-    <li class="{{ 'check-ok' if check.ok and not check.warning else 'check-warning' if check.ok else 'check-failed' }}">
-      {{ check.label }}{% if check.detail %} <span class="muted">({{ check.detail }})</span>{% endif %}</li>
-    {% endfor %}
-  </ul>
   {% endif %}
 
-  {% if job.status == "done" %}
-  <h2>Antes de gravar, confira no VLC</h2>
-  <ol class="checklist">
-    <li>O filme começa sozinho ao abrir o disco.</li>
-    <li>"Menu" e "Title" não travam nem tiram o filme do lugar.</li>
-    <li>Os capítulos pulam com "próximo".</li>
-    <li>Áudio e legenda trocam; a faixa e a legenda do início são as escolhidas.</li>
-    <li>Panorâmicas sem tranco nem pente; cores e faixas pretas corretas.</li>
-    <li>Legenda legível, em até 2 linhas.</li>
-    <li>Áudio sincronizado com a boca no começo, no meio e no fim.</li>
-    <li>No fim do filme o disco para, sem travar.</li>
-  </ol>
+  {% if view.qa %}
+  {% set ok = view.qa.checks | selectattr("ok") | list | length %}
+  <details class="qa"{% if not view.qa.passed %} open{% endif %}>
+    <summary>Conferência automática: {{ ok }} de {{ view.qa.checks | length }} itens ok</summary>
+    <ul class="checks">
+      {% for check in view.qa.checks %}
+      <li class="{{ 'check-ok' if check.ok and not check.warning else 'check-warning' if check.ok else 'check-failed' }}">
+        {{ check.label }}{% if check.detail %} <span class="muted">({{ check.detail }})</span>{% endif %}</li>
+      {% endfor %}
+    </ul>
+  </details>
   {% endif %}
 
   <p class="actions">
