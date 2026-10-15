@@ -141,6 +141,26 @@ def test_file_removed_before_stat_is_skipped(
     assert [v.path for v in find_videos(tmp_path, tmp_path / "d")] == ["d/b.mkv"]
 
 
+@NOT_ROOT
+def test_unreadable_subfolder_inside_a_disc_is_skipped(tmp_path: Path) -> None:
+    make_file(tmp_path / "d" / "ok.mkv")
+    locked = tmp_path / "d" / "trancada"
+    make_file(locked / "x.mkv")
+    locked.chmod(0o000)
+    try:
+        assert [v.path for v in find_videos(tmp_path, tmp_path / "d")] == ["d/ok.mkv"]
+    finally:
+        locked.chmod(0o755)
+
+
+def test_names_differing_only_in_normalization_count_once(tmp_path: Path) -> None:
+    # NFC and NFD forms can coexist on disk; both would map to the same stored path.
+    make_file(tmp_path / "d" / unicodedata.normalize("NFD", "Coração.mkv"))
+    make_file(tmp_path / "d" / "Coração.mkv")
+
+    assert [v.path for v in find_videos(tmp_path, tmp_path / "d")] == ["d/Coração.mkv"]
+
+
 def test_video_paths_are_nfc(tmp_path: Path) -> None:
     make_file(tmp_path / "d" / unicodedata.normalize("NFD", "Coração.mkv"))
 
@@ -214,7 +234,8 @@ def test_matching_ignores_case() -> None:
 def test_same_name_videos_share_the_subtitle() -> None:
     result = match_subtitles(["Filme.mkv", "Filme.mp4", "Filme.srt"])
 
-    assert result["Filme.mkv"] == result["Filme.mp4"] != ()
+    subtitle = (ExternalSubtitle(name="Filme.srt", language=None, image=False),)
+    assert result == {"Filme.mkv": subtitle, "Filme.mp4": subtitle}
 
 
 def test_unrelated_files_are_not_subtitles() -> None:

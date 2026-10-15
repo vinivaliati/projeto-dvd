@@ -58,26 +58,27 @@ def list_disc_folders(media_dir: Path) -> dict[str, Path]:
 
 def find_videos(media_dir: Path, folder: Path) -> list[VideoFile]:
     """Videos under a disc folder (recursive, links skipped), stat taken now, natural order."""
-    videos = []
+    videos: dict[str, VideoFile] = {}
     for dirpath, _, filenames in os.walk(folder, followlinks=False):
         directory = Path(dirpath)
         names = [name for name in filenames if not os.path.islink(directory / name)]
         for name, subtitles in match_subtitles(names).items():
             absolute = directory / name
+            path = nfc(absolute.relative_to(media_dir).as_posix())
+            if path in videos:  # same name in NFC and NFD: keep one, the path is the key
+                continue
             try:
                 stat = absolute.stat()
             except OSError:  # removed (or unreadable) since the listing
                 continue
-            videos.append(
-                VideoFile(
-                    path=nfc(absolute.relative_to(media_dir).as_posix()),
-                    absolute=absolute,
-                    size=stat.st_size,
-                    mtime_ns=stat.st_mtime_ns,
-                    subtitles=subtitles,
-                )
+            videos[path] = VideoFile(
+                path=path,
+                absolute=absolute,
+                size=stat.st_size,
+                mtime_ns=stat.st_mtime_ns,
+                subtitles=subtitles,
             )
-    return sorted(videos, key=lambda video: natural_key(video.path))
+    return sorted(videos.values(), key=lambda video: natural_key(video.path))
 
 
 def match_subtitles(filenames: list[str]) -> dict[str, tuple[ExternalSubtitle, ...]]:

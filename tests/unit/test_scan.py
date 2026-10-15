@@ -303,6 +303,21 @@ def test_status_changed(session: Session, media: Path, change: str) -> None:
     assert result.status == Status.CHANGED
 
 
+def test_same_size_with_another_mtime_has_changed(session: Session, media: Path) -> None:
+    scan(session, media, FakeProbe())
+    os.utime(media / "Disco" / "a.mkv", ns=(1, 1))
+
+    assert folder_view(session, media, "Disco", media / "Disco").status == Status.CHANGED
+
+
+def test_changed_wins_over_warnings(session: Session, media: Path) -> None:
+    # "mudou" asks for a new scan, so it is shown even when there are warnings.
+    scan(session, media, FakeProbe({"a.mkv": ProbeResult(json=None, error="Invalid data")}))
+    make_file(media / "Disco" / "c.mkv")
+
+    assert folder_view(session, media, "Disco", media / "Disco").status == Status.CHANGED
+
+
 def test_empty_folder_with_old_rows_has_changed(session: Session, media: Path) -> None:
     scan(session, media, FakeProbe())
     for file in (media / "Disco").iterdir():
