@@ -50,7 +50,7 @@ O teste num player físico é a segunda etapa da fase e fica para quando o grava
 | Retomar job e reaproveitar encode já feito | Fase 4 |
 | Copiar sem recodificar o vídeo de um rip de DVD (evita perder uma geração) | Fase 4 ou antes (registrado no Log) |
 | Idioma original pelo TMDB (hoje: o da primeira faixa de áudio) | Fase 2 |
-| Legendas PGS, VobSub (`dvd_subtitle`, `.idx/.sub`), ASS/SSA com estilo | fase futura (ver "Decisões": VobSub pendente do Vini) |
+| Legendas PGS, VobSub (`dvd_subtitle`, `.idx/.sub`), ASS/SSA com estilo | fase futura, junto com o PGS |
 | HDR10, HLG e Dolby Vision (tonemap para SDR), acima de 1080p | fase futura, se aparecer 4K no acervo (receita do tech-lead registrada) |
 | PAL, 25 fps, 24 fps exato, 29,97 progressivo, 59,94, fps variável, 1080i | fase futura, se aparecer |
 | Blu-ray | Fase 6 |
@@ -69,7 +69,7 @@ O teste num player físico é a segunda etapa da fase e fica para quando o grava
 | Nome do ISO | `iso/<nome da pasta>.iso`, sem sobrescrever sem confirmação |
 | HDR / 4K | Fora: "acho que não precisamos de 4K" |
 | Execução | Worker em processo separado (abordagem 1) |
-| **VobSub e ASS** | **pendente**: proposta é ficarem fora da Fase 3, como o PGS |
+| VobSub e ASS | Fora da Fase 3, como o PGS; para esses filmes, um SRT em português na pasta |
 
 Detalhes decididos na revisão (apresentados ao Vini junto com a spec): recusar também 24 fps
 exato, 29,97 progressivo, 59,94, 1080i e fps variável; capítulos automáticos a cada 5 min;
