@@ -5,6 +5,7 @@ about twice the disc size. The ISO reaches the output folder only after the auto
 """
 
 import argparse
+import json
 import os
 import shutil
 import sys
@@ -27,6 +28,22 @@ from projeto_dvd.authoring.dvd.mux import (
     mux_command,
     parse_first_pts,
 )
+from projeto_dvd.authoring.dvd.qa import (
+    QaReport,
+    bitstream_checks,
+    decode_check,
+    decode_command,
+    dvd_probe_command,
+    encode_check,
+    extract_video_command,
+    isoinfo_command,
+    size_checks,
+    stream_checks,
+    sync_check,
+    sync_probe_command,
+    tree_check,
+    vob_check,
+)
 from projeto_dvd.authoring.dvd.subtitles import (
     SubtitleError,
     extract_command,
@@ -37,9 +54,9 @@ from projeto_dvd.authoring.dvd.subtitles import (
 from projeto_dvd.config import Settings
 from projeto_dvd.db.session import make_engine, migrate
 from projeto_dvd.encode.audio import audio_command
-from projeto_dvd.encode.mpeg2 import PulldownError, apply_soft_pulldown
+from projeto_dvd.encode.mpeg2 import PulldownError, apply_soft_pulldown, inspect_stream
 from projeto_dvd.encode.video import video_pass_command
-from projeto_dvd.jobs.runner import Canceled, ProcessRunner, ToolError, Tools
+from projeto_dvd.jobs.runner import Canceled, ProcessRunner, RunResult, ToolError, Tools
 from projeto_dvd.library.files import list_disc_folders
 from projeto_dvd.library.probe import run_ffprobe
 from projeto_dvd.library.scan import folder_view, scan_folder
@@ -105,6 +122,20 @@ class PipelineError(Exception):
         self.step = step
 
 
+class QaFailed(PipelineError):
+    """The automatic QA rejected the disc; the ISO stays in the work folder."""
+
+    def __init__(self, report: QaReport) -> None:
+        failure = report.first_failure
+        label = failure.label if failure else "?"
+        super().__init__(
+            f"A conferência automática reprovou: {label}. O ISO ficou na pasta de trabalho "
+            "para inspeção.",
+            Step.QA,
+        )
+        self.report = report
+
+
 @dataclass(frozen=True)
 class PipelineResult:
     iso_path: Path
@@ -142,10 +173,11 @@ def run_pipeline(
             raise Canceled
 
     m2v = job_dir / "video.m2v"
+    pass2 = RunResult({}, "")
     for number, step in ((1, Step.VIDEO_PASS1), (2, Step.VIDEO_PASS2)):
         progress = begin(step)
         with _tool_step(step):
-            tools.run(
+            pass2 = tools.run(
                 video_pass_command(plan, source, job_dir, 1 if number == 1 else 2),
                 duration=plan.duration, on_progress=progress,
             )  # fmt: skip
@@ -166,8 +198,9 @@ def run_pipeline(
     movie = job_dir / "movie.mpg"
     with _tool_step(Step.MUX):
         first_pts = parse_first_pts(tools.capture(first_pts_command(m2v)))
-        tools.run(mux_command(plan, job_dir, first_pts), duration=plan.duration,
-                  on_progress=progress)  # fmt: skip
+        mux = tools.run(mux_command(plan, job_dir, first_pts), duration=plan.duration,
+                        on_progress=progress)  # fmt: skip
+        sync = sync_check(json.loads(tools.capture(sync_probe_command(movie))), plan)
     m2v.unlink()
     for number in range(1, len(plan.audio) + 1):
         audio_path(job_dir, number).unlink()
@@ -180,15 +213,41 @@ def run_pipeline(
     xml.write_text(dvdauthor_xml(plan, job_dir), encoding="utf-8")
     shutil.rmtree(job_dir / "dvd", ignore_errors=True)  # dvdauthor appends to what exists
     with _tool_step(Step.AUTHOR):
-        tools.run(dvdauthor_command(xml))
+        author = tools.run(dvdauthor_command(xml))
+    vob = vob_check(job_dir / "dvd")
     movie.unlink()
     begin(Step.ISO)
     with _tool_step(Step.ISO):
         tools.run(iso_command(plan, job_dir))
     shutil.rmtree(job_dir / "dvd")
     iso = job_dir / "disc.iso"
+    progress = begin(Step.QA)
+    with _tool_step(Step.QA):
+        checks = [*size_checks(iso.stat().st_size, plan), vob,
+                  tree_check(tools.capture(isoinfo_command(iso)))]  # fmt: skip
+        probe = json.loads(tools.capture(dvd_probe_command(iso)))
+        checks += stream_checks(probe, plan, _encoded_seconds(pass2, plan))
+        extracted = job_dir / "qa.m2v"
+        try:
+            tools.run(extract_video_command(iso, extracted))
+            checks += bitstream_checks(inspect_stream(extracted), plan)
+        finally:
+            extracted.unlink(missing_ok=True)
+        checks += [sync, encode_check(pass2, mux, author)]
+        decode = tools.run(decode_command(iso), duration=plan.duration, on_progress=progress)
+        checks.append(decode_check(decode.stderr))
+    qa_report = QaReport(checks=tuple(checks), iso_bytes=iso.stat().st_size,
+                         estimated_bytes=plan.estimated_bytes)  # fmt: skip
+    if not qa_report.passed:
+        raise QaFailed(qa_report)
     iso_path = _publish(iso, output_dir, plan, begin(Step.COPY), checkpoint)
-    return PipelineResult(iso_path=iso_path, qa_json=None)
+    return PipelineResult(iso_path=iso_path, qa_json=qa_report.model_dump_json())
+
+
+def _encoded_seconds(pass2: RunResult, plan: DvdPlan) -> float:
+    """The length of the encoded video, so a longer audio in the source does not fail QA."""
+    microseconds = pass2.progress.get("out_time_us", "")
+    return int(microseconds) / 1e6 if microseconds.isdecimal() else plan.duration
 
 
 def _render_subtitle(

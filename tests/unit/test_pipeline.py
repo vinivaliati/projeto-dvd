@@ -6,10 +6,12 @@ from pathlib import Path
 
 import pytest
 
-from projeto_dvd.encode.mpeg2 import PulldownError
+from projeto_dvd.authoring.dvd.qa import QaReport
+from projeto_dvd.encode.mpeg2 import PulldownError, StreamReport
 from projeto_dvd.jobs import pipeline
 from projeto_dvd.jobs.pipeline import (
     PipelineError,
+    QaFailed,
     Step,
     overall_progress,
     preflight,
@@ -34,13 +36,49 @@ MOVIE = json.dumps({
 })  # fmt: skip
 
 
+LISTING = "\n".join([
+    "/AUDIO_TS", "/VIDEO_TS", "/VIDEO_TS/VIDEO_TS.BUP;1", "/VIDEO_TS/VIDEO_TS.IFO;1",
+    "/VIDEO_TS/VTS_01_0.BUP;1", "/VIDEO_TS/VTS_01_0.IFO;1", "/VIDEO_TS/VTS_01_1.VOB;1",
+])  # fmt: skip
+THREE_LETTERS = {"pt": "por", "en": "eng", None: "und"}
+
+
+def disc_probe(plan: DvdPlan) -> str:
+    """What ffprobe -f dvdvideo would say about a disc made exactly as planned."""
+    streams: list[dict[str, object]] = [
+        {"codec_type": "video", "codec_name": "mpeg2video", "width": 720, "height": 480,
+         "display_aspect_ratio": plan.aspect, "r_frame_rate": "30000/1001"},
+    ]  # fmt: skip
+    streams += [{"codec_type": "audio", "codec_name": "ac3", "nb_read_packets": "10",
+                 "tags": {"language": THREE_LETTERS[a.language]}} for a in plan.audio]  # fmt: skip
+    streams += [{"codec_type": "subtitle", "codec_name": "dvd_subtitle", "nb_read_packets": "3",
+                 "tags": {"language": THREE_LETTERS[s.language]}}
+                for s in plan.subtitles]  # fmt: skip
+    chapters = [{"start_time": str(start)} for start in plan.chapters]
+    return json.dumps({"streams": streams, "chapters": chapters,
+                       "format": {"duration": str(plan.duration)}})  # fmt: skip
+
+
+def mux_packets(plan: DvdPlan) -> str:
+    streams = [{"index": 0, "codec_type": "video", "id": "0x1e0"}]
+    packets = [{"stream_index": 0, "pts_time": "0.555556"}]
+    for number, audio in enumerate(plan.audio, start=1):
+        streams.append({"index": number, "codec_type": "audio", "id": hex(0x7F + number)})
+        start = 0.555556 + max(audio.offset, 0.0)
+        packets.append({"stream_index": number, "pts_time": f"{start:.6f}"})
+    return json.dumps({"streams": streams, "packets": packets})
+
+
 class FakeTools:
     """Records commands; creates the output file of each; can fail at one tool."""
 
-    def __init__(self, fail_at: str | None = None, stderr: str = "") -> None:
+    def __init__(self, fail_at: str | None = None, stderr: str = "",
+                 decode_stderr: str = "") -> None:  # fmt: skip
         self.commands: list[list[str]] = []
         self.fail_at = fail_at
         self.stderr = stderr
+        self.decode_stderr = decode_stderr
+        self.plan = make_plan()
 
     def run(self, command: list[str], *, duration: float | None = None,
             on_progress: Callable[[float], None] | None = None, stdin: Path | None = None,
@@ -50,6 +88,8 @@ class FakeTools:
             raise ToolError(command[0], 1, self.stderr)
         if on_progress:
             on_progress(1.0)
+        if command[-3:] == ["-f", "null", "-"] and "dvdvideo" in command:
+            return RunResult({"progress": "end"}, self.decode_stderr)
         if stdout is not None:
             make_file(stdout, b"spu")
         elif command[0] == "dvdauthor":
@@ -60,10 +100,18 @@ class FakeTools:
         elif command[-1] != "-":
             output = Path(command[-1] if command[0] != "genisoimage" else command[-2])
             make_file(output, b"\x00\x00\x01\xb3" + bytes([0x2D, 0x01, 0xE0, 0x31]) + b"\xff" * 8)
-        return RunResult({"dup_frames": "0", "drop_frames": "0", "progress": "end"}, "")
+        seconds = str(int(self.plan.duration * 1e6))
+        return RunResult({"dup_frames": "0", "drop_frames": "0", "out_time_us": seconds,
+                          "progress": "end"}, "")  # fmt: skip
 
     def capture(self, command: list[str]) -> str:
         self.commands.append(command)
+        if command[0] == "isoinfo":
+            return LISTING
+        if "dvdvideo" in command:
+            return disc_probe(self.plan)
+        if any(arg.startswith("stream=") for arg in command):
+            return mux_packets(self.plan)
         return "0.055556\n"
 
 
@@ -79,9 +127,21 @@ def run(
     dirs: tuple[Path, Path, Path], tools: FakeTools, **plan_fields: object
 ) -> pipeline.PipelineResult:
     media, job, output = dirs
-    return run_pipeline(make_plan(**plan_fields), media_dir=media, job_dir=job, output_dir=output,
+    tools.plan = make_plan(**plan_fields)
+    return run_pipeline(tools.plan, media_dir=media, job_dir=job, output_dir=output,
                         tools=tools, report=lambda step, fraction: None,
                         should_cancel=lambda: False)  # fmt: skip
+
+
+GOOD_STREAM = StreamReport(frame_rate_codes={4}, progressive_sequence={0}, aspect_codes={3},
+                           pictures=100, repeated=50, max_gop=12)  # fmt: skip
+
+
+@pytest.fixture(autouse=True)
+def stream_report(monkeypatch: pytest.MonkeyPatch) -> list[StreamReport]:
+    reports = [GOOD_STREAM]
+    monkeypatch.setattr(pipeline, "inspect_stream", lambda path: reports[0])
+    return reports
 
 
 @pytest.fixture(autouse=True)
@@ -104,13 +164,15 @@ def test_runs_the_steps_in_order_and_publishes_the_iso(
     result = run(dirs, tools)
 
     tools_used = [command[0] for command in tools.commands]
-    assert tools_used == ["ffmpeg", "ffmpeg", "ffmpeg", "ffmpeg", "ffprobe", "ffmpeg",
-                          "dvdauthor", "genisoimage"]  # fmt: skip
+    assert tools_used == ["ffmpeg", "ffmpeg", "ffmpeg", "ffmpeg", "ffprobe", "ffmpeg", "ffprobe",
+                          "dvdauthor", "genisoimage", "isoinfo", "ffprobe", "ffmpeg",
+                          "ffmpeg"]  # fmt: skip
     assert no_pulldown == [dirs[1] / "video.m2v"]
     assert result.iso_path == dirs[2] / "iso" / "Filme.iso"
     assert result.iso_path.exists()
     job = dirs[1]
-    for leftover in ("video.m2v", "audio1.ac3", "audio2.ac3", "movie.mpg", "dvd", "disc.iso"):
+    for leftover in ("video.m2v", "audio1.ac3", "audio2.ac3", "movie.mpg", "dvd", "disc.iso",
+                     "qa.m2v"):  # fmt: skip
         assert not (job / leftover).exists(), leftover
     assert (job / "dvd.xml").exists()
 
@@ -425,3 +487,53 @@ def test_missing_external_subtitle_fails_with_its_name(dirs: tuple[Path, Path, P
         run(dirs, FakeTools(), subtitles=subtitles)
 
     assert caught.value.message == "A legenda Sumiu.srt não foi encontrada."
+
+
+def test_qa_report_is_returned(dirs: tuple[Path, Path, Path]) -> None:
+    result = run(dirs, FakeTools())
+
+    assert result.qa_json is not None
+    report = QaReport.model_validate_json(result.qa_json)
+    assert report.passed, [c for c in report.checks if not c.ok]
+    assert {"size", "vob", "tree", "video", "audio", "chapters", "bitstream", "sync", "encode",
+            "decode"} <= {c.name for c in report.checks}  # fmt: skip
+
+
+def test_failed_qa_keeps_the_iso_in_work_and_publishes_nothing(
+    dirs: tuple[Path, Path, Path], stream_report: list[StreamReport]
+) -> None:
+    stream_report[0] = StreamReport(frame_rate_codes={1}, progressive_sequence={0},
+                                    aspect_codes={3}, max_gop=12)  # fmt: skip
+
+    with pytest.raises(QaFailed) as caught:
+        run(dirs, FakeTools())
+
+    failure = caught.value.report.first_failure
+    assert failure is not None and failure.name == "bitstream"
+    assert caught.value.step == Step.QA
+    assert "O ISO ficou na pasta de trabalho" in caught.value.message
+    assert not (dirs[2] / "iso").exists() or not list((dirs[2] / "iso").iterdir())
+    assert (dirs[1] / "disc.iso").exists()
+    assert not (dirs[1] / "qa.m2v").exists()
+
+
+def test_decode_errors_fail_the_qa(dirs: tuple[Path, Path, Path]) -> None:
+    with pytest.raises(QaFailed) as caught:
+        run(dirs, FakeTools(decode_stderr="[mpeg2video @ 0x1] ac-tex damaged\n"))
+
+    failure = caught.value.report.first_failure
+    assert failure is not None and failure.name == "decode"
+
+
+def test_video_seconds_fall_back_to_the_plan(dirs: tuple[Path, Path, Path]) -> None:
+    tools = FakeTools()
+    original = tools.run
+
+    def run_without_time(command: list[str], **kwargs: object) -> RunResult:
+        result = original(command, **kwargs)  # type: ignore[arg-type]
+        return RunResult({k: v for k, v in result.progress.items() if k != "out_time_us"},
+                         result.stderr)  # fmt: skip
+
+    tools.run = run_without_time  # type: ignore[method-assign]
+
+    assert run(dirs, tools).qa_json is not None
