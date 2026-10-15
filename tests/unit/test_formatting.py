@@ -6,6 +6,7 @@ import pytest
 from projeto_dvd.api.formatting import (
     format_ago,
     format_aspect,
+    format_audio_codec,
     format_channels,
     format_duration,
     format_fps,
@@ -180,3 +181,12 @@ def test_format_remaining(seconds: float | None, text: str) -> None:
 
 def test_format_ago_without_a_date() -> None:
     assert format_ago(None, NOW) == "?"
+
+
+@pytest.mark.parametrize(
+    ("codec", "label"),
+    [("ac3", "Dolby Digital (AC-3)"), ("truehd", "Dolby TrueHD"), ("pcm_s24le", "PCM"),
+     ("vorbis", "VORBIS")],
+)  # fmt: skip
+def test_audio_codec_label(codec: str, label: str) -> None:
+    assert format_audio_codec(codec) == label

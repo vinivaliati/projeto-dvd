@@ -12,6 +12,7 @@ from sqlmodel import Session
 from projeto_dvd.api.formatting import (
     format_ago,
     format_aspect,
+    format_audio_codec,
     format_channels,
     format_duration,
     format_fps,
@@ -19,6 +20,7 @@ from projeto_dvd.api.formatting import (
     format_remaining,
     format_size,
     format_subtitle_kind,
+    input_label,
     probe_reason,
     video_label,
 )
@@ -40,6 +42,8 @@ templates.env.filters.update(
     subtitle_kind=format_subtitle_kind,
     ago=format_ago,
     remaining=format_remaining,
+    audio_codec=format_audio_codec,
+    input_label=input_label,
 )
 
 

@@ -6,6 +6,8 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 
 from projeto_dvd.api.deps import FolderDep, MediaDirDep, SessionDep, templates
+from projeto_dvd.api.dvd import dvd_state
+from projeto_dvd.jobs import store
 from projeto_dvd.library.files import list_disc_folders
 from projeto_dvd.library.probe import FfprobeMissingError, run_ffprobe
 from projeto_dvd.library.scan import folder_view, purge_missing_folders, scan_folder
@@ -29,7 +31,7 @@ def library_page(request: Request, session: SessionDep, media_dir: MediaDirDep) 
     folders = list_disc_folders(media_dir)
     purge_missing_folders(session, folders)
     views = [folder_view(session, media_dir, name, path) for name, path in folders.items()]
-    context = {"folders": views, "scanning": _scanning}
+    context = {"folders": views, "scanning": _scanning, "active": store.active_folders(session)}
     return templates.TemplateResponse(request, "library.html", context)
 
 
@@ -39,7 +41,13 @@ def folder_page(
 ) -> HTMLResponse:
     view = folder_view(session, media_dir, name, folder)
     # The body template is shared with the scan response: no scan result on a plain GET.
-    context = {"folder": view, "scan_error": None, "probed": None, "scanning": _scanning}
+    context = {
+        "folder": view,
+        "scan_error": None,
+        "probed": None,
+        "scanning": _scanning,
+        "dvd": dvd_state(session, view),
+    }
     return templates.TemplateResponse(request, "folder.html", context)
 
 
@@ -64,5 +72,11 @@ def scan(
             _scan_lock.release()
     view = folder_view(session, media_dir, name, folder)
     # Our own scan has finished here; a refused one shows the scan that is still running.
-    context = {"folder": view, "scan_error": error, "probed": probed, "scanning": _scanning}
+    context = {
+        "folder": view,
+        "scan_error": error,
+        "probed": probed,
+        "scanning": _scanning,
+        "dvd": dvd_state(session, view),
+    }
     return templates.TemplateResponse(request, "_folder_body.html", context)

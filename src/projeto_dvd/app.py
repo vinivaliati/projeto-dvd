@@ -7,7 +7,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from projeto_dvd.api import health, jobs, library
+from projeto_dvd.api import dvd, health, jobs, library
 from projeto_dvd.api.deps import WEB_DIR
 from projeto_dvd.api.security import SameOriginMiddleware
 from projeto_dvd.config import Settings
@@ -34,4 +34,5 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(health.router)
     app.include_router(library.router)
     app.include_router(jobs.router)
+    app.include_router(dvd.router)
     return app

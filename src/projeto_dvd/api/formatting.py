@@ -68,6 +68,29 @@ def _resolution(width: int, height: int) -> str:
     return "1080p" if width > 1280 or height > 720 else "720p"
 
 
+AUDIO_CODECS = {
+    "ac3": "Dolby Digital (AC-3)",
+    "eac3": "Dolby Digital Plus",
+    "dts": "DTS",
+    "truehd": "Dolby TrueHD",
+    "aac": "AAC",
+    "flac": "FLAC",
+    "mp3": "MP3",
+    "opus": "Opus",
+}
+
+
+def format_audio_codec(codec: str) -> str:
+    if codec.startswith("pcm_"):
+        return "PCM"
+    return AUDIO_CODECS.get(codec, codec.upper())
+
+
+def input_label(video: Video) -> str:
+    """ "1080p, 23,976 quadros/s": what the form says about the source."""
+    return f"{_resolution(video.width, video.height)}, {format_fps(video.fps)} quadros/s"
+
+
 def format_language(language: str | None) -> str:
     return language or UNDEFINED_LANGUAGE
 

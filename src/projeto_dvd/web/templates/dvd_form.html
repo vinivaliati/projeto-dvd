@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}Gerar DVD · {{ source.folder }}{% endblock %}
+{% block content %}
+<a class="back" href="{{ url_for('folder', name=source.folder | urlencode) }}">← {{ source.folder }}</a>
+<h1>Gerar DVD de <span class="folder-name">{{ source.folder }}</span></h1>
+<p class="muted">Entrada: {{ video | input_label }}, {{ source.summary.duration | duration }}</p>
+<p class="muted">Saída: DVD NTSC {{ shape.aspect }}{% if shape.height < 480 %} com faixas pretas (o filme é {{ video.aspect | aspect }}){% elif shape.width < 720 %} com faixas laterais{% endif %}. Leva cerca de 20 a 30 min.</p>
+{% if errors %}
+<div class="banner banner-error" role="alert"><ul>{% for error in errors %}<li>{{ error }}</li>{% endfor %}</ul></div>
+{% endif %}
+<form method="post" action="{{ url_for('create_dvd', name=source.folder | urlencode) }}" class="dvd-form">
+<div hx-post="{{ url_for('dvd_estimate', name=source.folder | urlencode) }}" hx-trigger="change"
+     hx-target="#profiles" hx-swap="outerHTML" hx-include="closest form">
+  <fieldset>
+    <legend>Áudio</legend>
+    {% for track in source.summary.audio %}
+    {% set out = outputs[track.index] %}
+    <div class="track">
+      <label><input type="checkbox" name="audio" value="{{ track.index }}"{% if track.index in choices.audio %} checked{% endif %}{% if errors and "áudio" in errors | join %} aria-invalid="true"{% endif %}>
+        {{ track.language | language }} · {{ track | channels }} · {{ track.codec | audio_codec }}{% if track.title %} · {{ track.title }}{% endif %}{% if track.default %} <span class="badge">padrão no arquivo</span>{% endif %}</label>
+      <span class="muted">{% if out.action == "copy" %}copiar sem perda{% else %}converter para Dolby Digital {{ "5.1" if out.channels == 6 else out.channels ~ " canais" if out.channels > 2 else "estéreo" if out.channels == 2 else "mono" }} ({{ out.kbps }} kbps){% endif %}</span>
+      <label class="radio"><input type="radio" name="first_audio" value="{{ track.index }}"{% if track.index == choices.first_audio %} checked{% endif %}{% if errors and "toca ao colocar" in errors | join %} aria-invalid="true"{% endif %}> Toca ao colocar o disco</label>
+    </div>
+    {% endfor %}
+    <p class="muted">As outras faixas trocam pelo botão Áudio do controle.</p>
+  </fieldset>
+  <fieldset>
+    <legend>Legendas</legend>
+    {% for option in source.options %}
+    <div class="track{% if not option.supported %} unsupported{% endif %}">
+      {% if option.supported %}
+      <label><input type="checkbox" name="subtitle" value="{{ option.key }}"{% if option.key in choices.subtitles %} checked{% endif %}>
+        {{ option.language_tag | language }}{% if option.title %} · {{ option.title }}{% endif %}{% if option.forced %} <span class="badge">forçada</span>{% endif %}{% if option.default %} <span class="badge">padrão no arquivo</span>{% endif %}</label>
+      <label class="radio"><input type="radio" name="subtitle_on" value="{{ option.key }}"{% if option.key == choices.subtitle_on %} checked{% endif %}{% if errors and "legenda ligada" in errors | join %} aria-invalid="true"{% endif %}> Ligada ao iniciar</label>
+      {% else %}
+      <span>{{ option.language_tag | language }}{% if option.title %} · {{ option.title }}{% endif %}</span>
+      <span class="muted">{{ option.reason }}</span>
+      {% endif %}
+    </div>
+    {% else %}
+    <p class="muted">O vídeo não tem legendas. Para incluir uma, coloque um .srt ao lado dele e escaneie de novo.</p>
+    {% endfor %}
+    {% if source.options %}
+    <label class="radio"><input type="radio" name="subtitle_on" value=""{% if choices.subtitle_on is none %} checked{% endif %}> Nenhuma (liga pelo botão Legenda do controle)</label>
+    {% endif %}
+  </fieldset>
+  <fieldset>
+    <legend>Capítulos</legend>
+    <label class="radio"><input type="radio" name="chapters" value="file"{% if choices.chapters == "file" %} checked{% endif %}{% if source.summary.chapters | length < 2 %} disabled{% endif %}>
+      Do arquivo ({{ source.summary.chapters | length }}){% if source.summary.chapters | length < 2 %} <span class="muted">o arquivo não tem capítulos</span>{% endif %}</label>
+    <label class="radio"><input type="radio" name="chapters" value="every"{% if choices.chapters == "every" %} checked{% endif %}>
+      A cada <input type="number" name="minutes" min="1" max="60" value="{{ choices.minutes }}" class="minutes"{% if errors and "capítulos" in errors | join %} aria-invalid="true"{% endif %}> minutos</label>
+    {% if chapters.note %}<p class="muted">{{ chapters.note }}</p>{% endif %}
+  </fieldset>
+  <fieldset>
+    <legend>Disco</legend>
+    {% include "_profile_cards.html" %}
+  </fieldset>
+</div>
+  {% if existing %}
+  <label class="confirm"><input type="checkbox" name="replace_iso" value="1"{% if choices.replace_iso %} checked{% endif %}>
+    Substituir o ISO existente ({{ existing.stat().st_size | size }})</label>
+  {% endif %}
+  <p class="actions"><button class="button primary" type="submit">Gerar DVD</button></p>
+</form>
+{% endblock %}

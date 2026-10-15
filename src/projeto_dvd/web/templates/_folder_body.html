@@ -1,3 +1,4 @@
+{% include "_dvd_block.html" %}
 <p class="muted numbers">
   {{ folder.files | length }} vídeo{{ "s" if folder.files | length != 1 }} · {{ folder.size | size }}{% if folder.duration is not none %} · {{ folder.duration | duration }}{% endif %}
 </p>
