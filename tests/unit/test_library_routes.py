@@ -60,7 +60,7 @@ def probes(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     def fake(path: Path) -> ProbeResult:
         calls.append(path.name)
         if path.name.startswith("ruim"):
-            return ProbeResult(json=None, error="Invalid data found when processing input")
+            return ProbeResult(json=None, error=f"{path}: Invalid data found when processing input")
         return ProbeResult(json=MOVIE_JSON, error=None)
 
     monkeypatch.setattr(library, "run_ffprobe", fake)
@@ -107,6 +107,15 @@ def test_library_without_folders_shows_help(tmp_path: Path, database_url: str) -
 
     assert response.status_code == 200
     assert "HOST_MEDIA_DIR" in response.text
+
+
+def test_empty_folder_card_does_not_ask_for_a_scan(tmp_path: Path, database_url: str) -> None:
+    (tmp_path / "Vazia").mkdir()
+    with TestClient(create_app(Settings(media_dir=tmp_path, database_url=database_url))) as client:
+        response = client.get("/")
+
+    assert "vazia" in response.text
+    assert "escaneie para ver" not in response.text
 
 
 def test_library_purges_rows_of_removed_folders(
@@ -203,6 +212,7 @@ def test_unreadable_file_is_shown_with_its_error(
 
     assert "Não foi possível ler o arquivo" in response.text
     assert "Invalid data found" in response.text
+    assert str(media) not in response.text  # the name is in the first column already
     assert "1 arquivo com aviso" in response.text
 
 
@@ -213,6 +223,8 @@ def test_changed_files_are_announced(client: TestClient, media: Path, probes: li
     response = client.get(folder_url("Senhor dos Aneis"))
 
     assert "Arquivos mudaram desde o último scan" in response.text
+    # The size of the new file sits under "Tamanho", not under "Duração".
+    assert re.search(r"As Duas Torres.mkv</td>\s*<td></td>\s*<td class=\"numbers\">", response.text)
 
 
 def test_missing_ffprobe_shows_one_message(

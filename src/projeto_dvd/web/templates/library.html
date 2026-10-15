@@ -13,9 +13,11 @@
       <span class="muted numbers">
         {{ folder.files | length }} vídeo{{ "s" if folder.files | length != 1 }} · {{ folder.size | size }}
       </span>
-      <span class="muted numbers">
-        {% if folder.status.name in ("EMPTY", "NOT_SCANNED") %}escaneie para ver{% else %}{{ folder.duration | duration }}{% endif %}
-      </span>
+      {% if folder.status.name == "NOT_SCANNED" %}
+      <span class="muted">escaneie para ver</span>
+      {% elif folder.status.name != "EMPTY" %}
+      <span class="muted numbers">{{ folder.duration | duration }}</span>
+      {% endif %}
     </a>
   </li>
   {% endfor %}

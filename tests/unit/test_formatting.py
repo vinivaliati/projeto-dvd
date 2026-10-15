@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 
 from projeto_dvd.api.formatting import (
@@ -6,6 +8,7 @@ from projeto_dvd.api.formatting import (
     format_fps,
     format_size,
     last_line,
+    probe_reason,
     video_label,
 )
 from projeto_dvd.library.probe import Video
@@ -16,6 +19,14 @@ def test_last_line() -> None:
 
     assert last_line(error) == "x.mkv: Invalid data found"
     assert last_line("") == ""
+
+
+def test_probe_reason_drops_the_file_path() -> None:
+    path = Path("/media/Senhor dos Aneis/ruim.mkv")
+    error = f"[mov @ 0x1] moov atom not found\n{path}: Invalid data found"
+
+    assert probe_reason(error, path) == "Invalid data found"
+    assert probe_reason("Permission denied", path) == "Permission denied"
 
 
 @pytest.mark.parametrize(

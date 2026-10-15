@@ -1,5 +1,7 @@
 """Brazilian Portuguese formatting for the templates (Jinja filters)."""
 
+from pathlib import Path
+
 from projeto_dvd.library.probe import Video
 
 VIDEO_CODECS = {
@@ -59,6 +61,11 @@ def last_line(text: str) -> str:
     """ffprobe prints the reason last; earlier lines carry memory addresses."""
     lines = text.strip().splitlines()
     return lines[-1] if lines else ""
+
+
+def probe_reason(error: str, path: Path) -> str:
+    """The reason alone: ffprobe starts it with the path, already shown beside it."""
+    return last_line(error).removeprefix(f"{path}: ")
 
 
 def _decimal(value: float) -> str:

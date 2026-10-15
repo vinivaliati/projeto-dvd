@@ -15,7 +15,7 @@ from projeto_dvd.api.formatting import (
     format_duration,
     format_fps,
     format_size,
-    last_line,
+    probe_reason,
     video_label,
 )
 from projeto_dvd.config import Settings
@@ -33,7 +33,7 @@ templates.env.filters.update(
     fps=format_fps,
     aspect=format_aspect,
     video_label=video_label,
-    last_line=last_line,
+    probe_reason=probe_reason,
 )
 
 # One scan at a time: ffprobe is heavy on a USB drive, and two scans of the same folder

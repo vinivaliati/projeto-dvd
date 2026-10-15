@@ -31,12 +31,13 @@
     {% if file.error is not none %}
     <tr class="row-error">
       <td>{{ name }}</td>
-      <td colspan="7">Não foi possível ler o arquivo: {{ file.error | last_line }}</td>
+      <td colspan="7">Não foi possível ler o arquivo: {{ file.error | probe_reason(file.video.absolute) }}</td>
     </tr>
     {% elif file.summary is none %}
     <tr>
       <td>{{ name }}</td>
-      <td colspan="2" class="numbers">{{ file.video.size | size }}</td>
+      <td></td>
+      <td class="numbers">{{ file.video.size | size }}</td>
       <td colspan="5" class="muted">ainda não escaneado</td>
     </tr>
     {% else %}
