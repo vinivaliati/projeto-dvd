@@ -32,6 +32,7 @@ REAL_OUTPUT: dict[str, tuple[str, str]] = {
         "xorriso 1.5.6 : RockRidge filesystem manipulator, libburnia project.\n\nxorriso 1.5.6\n",
         "1.5.6",
     ),
+    "genisoimage": ("genisoimage 1.1.11 (Linux)\n", "1.1.11"),
     "tsMuxeR": ("tsMuxeR version 2.7.0. github.com/justdan96/tsMuxer\n", "2.7.0"),
 }
 

@@ -14,6 +14,7 @@ ALL_FOUND: dict[str, str | None] = {
     "dvdauthor": "0.7.2",
     "spumux": "0.7.2",
     "xorriso": "1.5.6",
+    "genisoimage": "1.1.11",
     "tsMuxeR": "2.7.0",
 }
 

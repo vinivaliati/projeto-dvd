@@ -45,3 +45,6 @@ testpaths = ["tests"]
 # "not slow" by default; "-m slow" on the command line wins (last -m applies).
 addopts = "--strict-markers -m 'not slow' --cov=projeto_dvd --cov-branch --cov-report=term-missing --cov-fail-under=90"
 markers = ["slow: integration tests that need the media toolchain (run inside the Docker image)"]
+
+[tool.coverage.report]
+exclude_also = ['if __name__ == "__main__":']

@@ -15,10 +15,11 @@ def first_pts_command(m2v: Path) -> list[str]:
 
 
 def parse_first_pts(output: str) -> float:
-    lines = [line for line in output.split() if line]
-    if not lines:
+    # The first column; ffprobe adds an empty one for the frame side data ("0.041708,").
+    values = [line.split(",")[0] for line in output.split() if line.split(",")[0]]
+    if not values:
         raise ValueError("ffprobe returned no frame")
-    return float(lines[0])
+    return float(values[0])
 
 
 def audio_path(job_dir: Path, number: int) -> Path:

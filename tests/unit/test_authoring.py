@@ -26,6 +26,8 @@ def test_first_pts_command_reads_one_frame_with_generated_timestamps() -> None:
 
 def test_parse_first_pts() -> None:
     assert parse_first_pts("\n0.055556\n") == pytest.approx(0.055556)
+    # ffprobe 7.1 adds an empty column for the frame side data.
+    assert parse_first_pts("0.041708,\n") == pytest.approx(0.041708)
     with pytest.raises(ValueError):
         parse_first_pts("")
 
