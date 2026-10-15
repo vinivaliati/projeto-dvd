@@ -216,6 +216,7 @@ button.primary[disabled] { background: var(--border); color: var(--muted); curso
 .step-current { font-weight: 600; }
 .step-current::marker { content: "▸  "; color: var(--accent); }
 .step-todo { color: var(--muted); }
+.step-todo::marker { content: "○  "; }
 .checks { list-style: none; padding: 0; }
 .check-ok::before { content: "✓ "; color: var(--ok); }
 .check-warning::before { content: "! "; color: var(--warning); }

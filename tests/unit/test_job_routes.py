@@ -167,3 +167,11 @@ def test_job_list_and_nav(client: TestClient) -> None:
 
     assert "Senhor dos Aneis" in page.text and "DVD-9" in page.text
     assert '/jobs">Jobs</a>' in client.get("/").text
+
+
+def test_tiny_leftovers_do_not_offer_a_cleanup(client: TestClient, settings: Settings) -> None:
+    job_id = new_job(client)
+    store.request_cancel(engine_of(client), job_id)  # type: ignore[arg-type]
+    make_file(job_dir(settings.work_dir, job_id) / "dvd.xml", b"<dvdauthor/>")
+
+    assert "Apagar arquivos temporários" not in client.get(f"/jobs/{job_id}").text

@@ -74,7 +74,7 @@
     {% if job.status in ("failed", "canceled") %}
     <a class="button secondary" href="{{ url_for('dvd_form', name=job.folder | urlencode) }}">Gerar de novo</a>
     {% endif %}
-    {% if not view.active and view.temp_bytes %}
+    {% if not view.active and view.temp_bytes >= 1000000 %}
     <button class="button secondary" type="button"
             hx-post="{{ url_for('clean_job', job_id=job.id) }}" hx-target="#job-status"
             hx-swap="outerHTML"
