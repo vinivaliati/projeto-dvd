@@ -2,6 +2,7 @@
 
 import json
 import subprocess
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -30,7 +31,13 @@ def test_committed_fixtures_match_the_image_ffprobe(regenerated: Path, name: str
     committed = json.loads((FIXTURES / "probe" / f"{name}.json").read_text())
     fresh = json.loads((regenerated / f"{name}.json").read_text())
 
-    assert summarize(fresh) == summarize(committed)
+    fresh_summary, committed_summary = summarize(fresh), summarize(committed)
+
+    # An MPEG program stream (the DVD clip) has no stored duration: ffprobe estimates it from
+    # the last timestamps, and the MPEG-2 encoder output varies slightly with the CPU (23 ms
+    # between this machine and the CI runner). Everything else must match exactly.
+    assert replace(fresh_summary, duration=None) == replace(committed_summary, duration=None)
+    assert fresh_summary.duration == pytest.approx(committed_summary.duration, abs=0.1)
 
 
 def test_scan_end_to_end(session: Session, tmp_path: Path) -> None:
