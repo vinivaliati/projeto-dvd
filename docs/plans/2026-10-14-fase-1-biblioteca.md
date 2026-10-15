@@ -15,7 +15,7 @@
 - The input folder (`MEDIA_DIR`, `/media` in Docker) is **never written to**. No `open(..., "w")`, `touch`, `mkdir` or chmod under it, anywhere.
 - Symlinks are ignored (disc folders, files, folders inside a disc folder). Names are normalized to Unicode NFC before comparing and storing.
 - Video extensions: `.mkv .mp4 .m4v .avi .mov .ts .m2ts`; external subtitles: `.srt .ass .ssa .sup`, plus `.idx` only when the `.sub` with the same name exists. Case-insensitive.
-- ffprobe command: `ffprobe -v error -print_format json -show_format -show_streams -show_chapters <absolute path>`, list arguments, no shell, timeout 60 s, stderr truncated to 500 characters.
+- ffprobe command: `ffprobe -v error -print_format json -show_format -show_streams -show_chapters <absolute path>`, list arguments, no shell, timeout 60 s, keeping the last 500 characters of stderr.
 - UI text in Portuguese, Brazilian number format (`23,976`, `38 GB`, `2h58`); code, identifiers, commits and docstrings in English.
 - Warning texts, exactly: "Não foi possível ler o arquivo", "Sem faixa de vídeo", "HDR (precisa de conversão para SDR)", "Dolby Vision perfil 5 (conversão de cor a confirmar)", "Acima de 1080p".
 - Palette: background `#121212`, surface `#1c1c1e`, border `#2c2c2e`, text `#ececec`, secondary `#9a9a9a`, accent `#e0a526`, ok `#4caf50`, error `#e5534b`; body `system-ui`, folder names `Georgia, serif`, numbers `tabular-nums`, max width ~1100 px.
@@ -28,7 +28,9 @@
 ## Plan decisions (beyond the spec)
 
 - The scan count goes to the screen instead of a log line ("Scan concluído: 2 arquivos lidos pelo ffprobe."): uvicorn does not show app loggers by default, and on screen it is testable and useful for the manual QA of the incremental scan on `/mnt/c`.
-- `dvd_subtitle` cannot be generated from text with ffmpeg (bitmap encoders need bitmap input); image subtitles are covered by the hand-written PGS fixture and by summary tests on small dicts.
+- The DVD fixture gets a real `dvd_subtitle` stream through `spumux` (already in the image), since ffmpeg cannot encode bitmap subtitles from text.
+- ffprobe errors keep the **last** 500 characters of stderr (the useful line is the last one; the first lines carry memory addresses that change on every run) and the UI shows only the last line.
+- A "mudou" card keeps showing the old duration (the old value still informs); only never-scanned folders show "escaneie para ver".
 - "Upsert by path" is done through the ORM inside the scan lock (load the folder's rows, update or insert); `path` keeps a unique index as the database-level guard.
 - The app is built by a factory (`create_app(settings)`), and uvicorn runs with `--factory`, so tests get their own media folder and database.
 - A never-scanned folder shows a message in place of the table, and the header button is the only "Escanear" (one button, one HTMX setup), instead of a second big button.
@@ -41,6 +43,10 @@
 3. The external drive disconnected (empty `/media`): the library shows the help card and does not crash (Task 4 test `test_library_without_folders_shows_help`); cached rows are purged, which only costs a rescan.
 4. Two clicks on "Escanear" (or two tabs): the second request answers "Já existe um scan em andamento" instead of probing twice (Task 4 test `test_scan_while_another_is_running_reports_it`).
 5. A video whose stream data is partial (no duration, `0/0` frame rate, `0:1` aspect, no channel layout): the summary shows "?" and never divides by zero (Task 2 tests `test_missing_values_do_not_break_the_summary` and friends).
+6. The input folder is never written (done criterion 5): `test_scan_never_writes_to_the_media_folder`, `test_scan_works_on_a_read_only_folder`, `test_routes_never_write_to_the_media_folder`, and `touch /media` failing in the CI smoke test.
+7. A second scan without changes does not run ffprobe (done criterion 3): `test_second_scan_without_changes_does_not_probe`, `test_second_scan_reports_nothing_read`.
+8. A crafted folder name (`..`, `a%2Fb`, a symlink, a file) never reaches the filesystem: `test_unknown_folders_are_404`.
+9. A name with superscript digits ("Rocky 2²") or mixed NFC/NFD accents does not break sorting or subtitle matching: `test_natural_order_with_superscript_digits`, `test_subtitle_matching_normalizes_accents`.
 
 ---
 
@@ -487,7 +493,8 @@ ff -f lavfi -i testsrc=s=1920x800:r=24000/1001:d=4 \
    -map 0:v -map 1:a -map 2:a -map 3 -map_chapters 4 \
    -c:v libx264 -preset ultrafast -c:a:0 ac3 -ac:a:0 6 -c:a:1 aac -ac:a:1 2 -c:s srt \
    -metadata:s:a:0 language=por -metadata:s:a:1 language=eng -metadata:s:a:1 title=Comentario \
-   -metadata:s:s:0 language=por -disposition:s:0 forced \
+   -metadata:s:s:0 language=por \
+   -disposition:a:0 0 -disposition:a:1 0 -disposition:s:0 forced \
    -attach cover.jpg -metadata:s:t mimetype=image/jpeg -metadata:s:t filename=cover.jpg \
    movie.mkv
 
@@ -510,9 +517,14 @@ ff -f lavfi -i testsrc=s=1920x1080:r=24:d=1 -c:v libx265 -preset ultrafast -pix_
    -x265-params log-level=error:colorprim=bt2020:transfer=arib-std-b67:colormatrix=bt2020nc \
    hlg.mp4
 
-# NTSC DVD-style MPEG-2: anamorphic 16:9, 29.97 fps, stereo AC-3 without a language tag.
+# NTSC DVD-style MPEG-2: anamorphic 16:9, 29.97 fps, stereo AC-3 without a language tag, and a
+# real dvd_subtitle (bitmap) muxed by spumux; ffmpeg cannot encode bitmap subtitles from text.
+ff -f lavfi -i "color=c=black@0.0:s=720x480,format=rgba,drawbox=x=100:y=400:w=200:h=30:color=white:t=fill" \
+   -frames:v 1 sub.png
 ff -f lavfi -i testsrc=s=720x480:r=30000/1001:d=2 -f lavfi -i sine=d=2:sample_rate=48000 \
-   -c:v mpeg2video -aspect 16:9 -c:a ac3 -ac 2 dvd.mpg
+   -c:v mpeg2video -aspect 16:9 -c:a ac3 -ac 2 -f dvd plain.mpg
+printf '<subpictures><stream><spu start="00:00:00.50" end="00:00:01.50" image="sub.png"/></stream></subpictures>\n' > sub.xml
+spumux -s0 sub.xml < plain.mpg > dvd.mpg 2> spumux.log
 
 for clip in movie.mkv cover.mp4 cover_only.mp4 hdr10.mkv hlg.mp4 dvd.mpg; do
     ffprobe -v error -print_format json -show_format -show_streams -show_chapters "$clip" \
@@ -561,7 +573,8 @@ Expected: `cover.json cover_only.json dvd.json hdr10.json hlg.json movie.json` (
                     "rpu_present_flag": 1,
                     "el_present_flag": 0,
                     "bl_present_flag": 1,
-                    "dv_bl_signal_compatibility_id": 0
+                    "dv_bl_signal_compatibility_id": 0,
+                    "dv_md_compression": 0
                 }
             ]
         },
@@ -602,7 +615,6 @@ from typing import Any
 
 import pytest
 
-from projeto_dvd.library import probe
 from projeto_dvd.library.probe import (
     ABOVE_1080P,
     DOLBY_VISION_5,
@@ -682,7 +694,7 @@ def fake_run(
             raise raises
         return subprocess.CompletedProcess(command, returncode, stdout, stderr)
 
-    monkeypatch.setattr(probe.subprocess, "run", run)
+    monkeypatch.setattr(subprocess, "run", run)
     return calls
 
 
@@ -701,14 +713,14 @@ def test_run_returns_the_json(monkeypatch: pytest.MonkeyPatch) -> None:
     [
         ({"returncode": 1, "stderr": "a.mkv: Invalid data found\n"}, "a.mkv: Invalid data found"),
         ({"returncode": 1, "stderr": ""}, "ffprobe terminou com código 1"),
-        ({"returncode": 1, "stderr": "x" * 600}, "x" * 500),
+        ({"returncode": 1, "stderr": "a" * 100 + "x" * 500}, "x" * 500),
         ({"stdout": "not json"}, "ffprobe devolveu um JSON inválido"),
         (
             {"raises": subprocess.TimeoutExpired(["ffprobe"], 60)},
             "ffprobe não respondeu em 60 s",
         ),
     ],
-    ids=["exit-code", "exit-code-silent", "truncated", "invalid-json", "timeout"],
+    ids=["exit-code", "exit-code-silent", "keeps-the-end", "invalid-json", "timeout"],
 )
 def test_run_reports_errors(
     monkeypatch: pytest.MonkeyPatch, kwargs: dict[str, Any], error: str
@@ -718,8 +730,11 @@ def test_run_reports_errors(
     assert run_ffprobe(Path("/media/a.mkv")) == ProbeResult(json=None, error=error)
 
 
-def test_run_raises_when_ffprobe_is_missing(monkeypatch: pytest.MonkeyPatch) -> None:
-    fake_run(monkeypatch, raises=FileNotFoundError("ffprobe"))
+@pytest.mark.parametrize("error", [FileNotFoundError("ffprobe"), PermissionError("ffprobe")])
+def test_run_raises_when_ffprobe_cannot_start(
+    monkeypatch: pytest.MonkeyPatch, error: OSError
+) -> None:
+    fake_run(monkeypatch, raises=error)
 
     with pytest.raises(FfprobeMissingError):
         run_ffprobe(Path("/media/a.mkv"))
@@ -800,6 +815,9 @@ def test_dvd_mpeg2() -> None:
     assert summary.video.aspect == pytest.approx(16 / 9)
     assert summary.audio[0].language == UNDEFINED_LANGUAGE  # no tag at all
     assert summary.audio[0].channels == "estéreo"
+    assert len(summary.audio) == 1  # the dvd_nav_packet data stream is ignored
+    assert summary.subtitles[0].codec == "dvd_subtitle"
+    assert summary.subtitles[0].kind == "imagem"
 
 
 def test_dolby_vision_profile_5_with_pgs() -> None:
@@ -894,6 +912,7 @@ def test_language(tags: dict[str, str], language: str) -> None:
     [
         ("subrip", "texto"),
         ("ass", "texto"),
+        ("ssa", "texto"),
         ("mov_text", "texto"),
         ("webvtt", "texto"),
         ("hdmv_pgs_subtitle", "imagem"),
@@ -963,7 +982,7 @@ UNDEFINED_LANGUAGE = "não definido"
 
 HDR_TRANSFERS = frozenset({"smpte2084", "arib-std-b67"})
 DOVI_SIDE_DATA = "DOVI configuration record"
-TEXT_SUBTITLES = frozenset({"subrip", "ass", "mov_text", "webvtt", "text"})
+TEXT_SUBTITLES = frozenset({"subrip", "ass", "ssa", "mov_text", "webvtt", "text"})
 IMAGE_SUBTITLES = frozenset({"hdmv_pgs_subtitle", "dvd_subtitle", "dvb_subtitle", "xsub"})
 CHANNEL_LAYOUTS = {"mono": "mono", "stereo": "estéreo", "5.1": "5.1", "5.1(side)": "5.1", "7.1": "7.1"}
 CHANNEL_COUNTS = {1: "mono", 2: "estéreo", 6: "5.1", 8: "7.1"}
@@ -1046,13 +1065,14 @@ def run_ffprobe(path: Path) -> ProbeResult:
             timeout=TIMEOUT_SECONDS,
             check=False,
         )
-    except FileNotFoundError as error:
+    except OSError as error:  # not installed, or not executable
         raise FfprobeMissingError from error
     except subprocess.TimeoutExpired:
         return ProbeResult(json=None, error=f"ffprobe não respondeu em {TIMEOUT_SECONDS} s")
     if result.returncode != 0:
         message = result.stderr.strip() or f"ffprobe terminou com código {result.returncode}"
-        return ProbeResult(json=None, error=message[:ERROR_LIMIT])
+        # The end: ffprobe prints the reason last ("<file>: Invalid data found ...").
+        return ProbeResult(json=None, error=message[-ERROR_LIMIT:])
     try:
         json.loads(result.stdout)
     except json.JSONDecodeError:
@@ -1151,7 +1171,7 @@ def _warnings(video: Video | None) -> tuple[str, ...]:
 
 
 def _channels(stream: dict[str, Any]) -> str:
-    layout = stream.get("channel_layout")
+    layout: str | None = stream.get("channel_layout")
     if layout:
         return CHANNEL_LAYOUTS.get(layout, layout)
     count = stream.get("channels")
@@ -1287,6 +1307,15 @@ def test_natural_order() -> None:
     names = ["S01E10.mkv", "S01E02.mkv", "s01e01.mkv", "Extra.mkv"]
 
     assert sorted(names, key=natural_key) == ["Extra.mkv", "s01e01.mkv", "S01E02.mkv", "S01E10.mkv"]
+
+
+def test_natural_order_with_superscript_digits() -> None:
+    # "²" is a digit for str.isdigit() but not a decimal: int("²") would raise.
+    assert sorted(["Rocky 2²", "Rocky 10", "Rocky 2"], key=natural_key) == [
+        "Rocky 2",
+        "Rocky 2²",
+        "Rocky 10",
+    ]
 
 
 # Disc folders
@@ -1429,9 +1458,17 @@ def test_subtitle_languages_and_kinds() -> None:
 
     assert result["Filme.mkv"] == (
         ExternalSubtitle(name="Filme.en.forced.ass", language="en.forced", image=False),
-        ExternalSubtitle(name="Filme.pt.sup", language="pt", image=True),
         ExternalSubtitle(name="Filme.pt-BR.ssa", language="pt-BR", image=False),
+        ExternalSubtitle(name="Filme.pt.sup", language="pt", image=True),
     )
+
+
+def test_subtitle_matching_normalizes_accents() -> None:
+    video = unicodedata.normalize("NFD", "Coração.mkv")  # keys keep the real name, for reading
+
+    result = match_subtitles([video, "Coração.pt.srt"])
+
+    assert result == {video: (ExternalSubtitle(name="Coração.pt.srt", language="pt", image=False),)}
 
 
 def test_idx_needs_its_sub() -> None:
@@ -1523,7 +1560,8 @@ def nfc(text: str) -> str:
 def natural_key(text: str) -> tuple[tuple[int, str], ...]:
     """Sort key that puts S01E02 before S01E10, ignoring case."""
     return tuple(
-        (int(part), "") if part.isdigit() else (0, part.casefold())
+        # isdecimal, not isdigit: "²" is a digit but int() rejects it.
+        (int(part), "") if part.isdecimal() else (0, part.casefold())
         for part in re.split(r"(\d+)", text)
     )
 
@@ -1547,7 +1585,7 @@ def find_videos(media_dir: Path, folder: Path) -> list[VideoFile]:
     videos = []
     for dirpath, _, filenames in os.walk(folder, followlinks=False):
         directory = Path(dirpath)
-        names = [name for name in filenames if not (directory / name).is_symlink()]
+        names = [name for name in filenames if not os.path.islink(directory / name)]
         for name, subtitles in match_subtitles(names).items():
             absolute = directory / name
             try:
@@ -1571,14 +1609,17 @@ def match_subtitles(filenames: list[str]) -> dict[str, tuple[ExternalSubtitle, .
 
     A subtitle belongs to the video whose name (without extension) starts it, followed by a
     dot; when several videos match, only the longest name wins ("Filme.2.pt.srt" belongs to
-    "Filme.2.mkv", not to "Filme.mkv").
+    "Filme.2.mkv", not to "Filme.mkv"). Names are compared in NFC, ignoring case; the keys of
+    the result are the real video names.
     """
-    lower_names = {name.lower() for name in filenames}
+    lower_names = {nfc(name).lower() for name in filenames}
     stems = {
-        name: Path(name).stem for name in filenames if Path(name).suffix.lower() in VIDEO_EXTENSIONS
+        name: nfc(Path(name).stem)
+        for name in filenames
+        if Path(name).suffix.lower() in VIDEO_EXTENSIONS
     }
     result: dict[str, list[ExternalSubtitle]] = {name: [] for name in stems}
-    for name in sorted(filenames, key=natural_key):
+    for name in sorted(map(nfc, filenames), key=natural_key):
         suffix = Path(name).suffix.lower()
         if suffix not in SUBTITLE_EXTENSIONS:
             continue
@@ -1598,8 +1639,8 @@ def match_subtitles(filenames: list[str]) -> dict[str, tuple[ExternalSubtitle, .
                 language = base[len(stem) + 1 :]
                 result[video].append(
                     ExternalSubtitle(
-                        name=nfc(name),
-                        language=nfc(language) or None,
+                        name=name,
+                        language=language or None,
                         image=suffix in IMAGE_SUBTITLE_EXTENSIONS,
                     )
                 )
@@ -1773,6 +1814,19 @@ def test_file_removed_before_probing_is_skipped(session: Session, media: Path) -
     scan_folder(session, media, "Disco", media / "Disco", vanish)
 
     assert rows(session) == {}
+
+
+def test_row_of_a_file_removed_while_probing_is_dropped(session: Session, media: Path) -> None:
+    scan(session, media, FakeProbe())
+    (media / "Disco" / "a.mkv").write_bytes(b"changed")
+
+    def vanish(path: Path) -> ProbeResult:
+        path.unlink()
+        return ProbeResult(json=None, error="No such file or directory")
+
+    scan_folder(session, media, "Disco", media / "Disco", vanish)
+
+    assert list(rows(session)) == ["Disco/b.mkv"]
 
 
 def test_missing_ffprobe_stops_the_scan_without_marking_files(
@@ -2016,7 +2070,10 @@ def scan_folder(session: Session, media_dir: Path, name: str, folder: Path, prob
         result = probe(video.absolute)
         probed += 1
         if result.error is not None and not video.absolute.exists():
-            continue  # removed while scanning
+            if row is not None:  # removed while scanning
+                session.delete(row)
+                session.commit()
+            continue
         row = row or MediaFile(folder=name, path=video.path, size=0, mtime_ns=0, scanned_at=_now())
         # The stat from before ffprobe: a file still being copied will look changed next time.
         row.size, row.mtime_ns = video.size, video.mtime_ns
@@ -2122,7 +2179,7 @@ git commit -m "feat: scan disc folders incrementally"
 - Produces:
   - `projeto_dvd.app.create_app(settings: Settings | None = None) -> FastAPI` (state: `settings`, `engine`)
   - route names `library`, `folder`, `scan_folder`, `health`, `static`
-  - `formatting.format_size(size: int) -> str`, `format_duration(seconds: float | None) -> str`, `format_fps(fps: float | None) -> str`, `format_aspect(ratio: float | None) -> str | None`, `video_label(video: Video) -> str`
+  - `formatting.format_size(size: int) -> str`, `format_duration(seconds: float | None) -> str`, `format_fps(fps: float | None) -> str`, `format_aspect(ratio: float | None) -> str | None`, `video_label(video: Video) -> str`, `last_line(text: str) -> str`
   - `api.library._scan_lock: threading.Lock`
 
 - [ ] **Step 1: Write the failing formatting tests**
@@ -2136,9 +2193,17 @@ from projeto_dvd.api.formatting import (
     format_duration,
     format_fps,
     format_size,
+    last_line,
     video_label,
 )
 from projeto_dvd.library.probe import Video
+
+
+def test_last_line() -> None:
+    error = "[matroska,webm @ 0x5945] EBML header parsing failed\nx.mkv: Invalid data found"
+
+    assert last_line(error) == "x.mkv: Invalid data found"
+    assert last_line("") == ""
 
 
 @pytest.mark.parametrize(
@@ -2192,6 +2257,8 @@ def make_video(codec: str, width: int, height: int, fps: float | None = 24.0) ->
     [
         (make_video("h264", 1920, 800, 24000 / 1001), "1080p · H.264 · 23,976"),
         (make_video("hevc", 3840, 2160), "2160p · HEVC · 24"),
+        (make_video("hevc", 3832, 1600), "2160p · HEVC · 24"),
+        (make_video("hevc", 4096, 1716), "2160p · HEVC · 24"),
         (make_video("hevc", 2048, 858), "2048x858 · HEVC · 24"),
         (make_video("mpeg2video", 720, 480, 30000 / 1001), "720x480 · MPEG-2 · 29,97"),
         (make_video("h264", 1280, 720), "720p · H.264 · 24"),
@@ -2265,12 +2332,18 @@ def video_label(video: Video) -> str:
 
 
 def _resolution(width: int, height: int) -> str:
-    # Scope movies are 1920 wide but less than 1080 high: the width decides.
-    if width == 3840 or height == 2160:
+    # Scope movies are full width but less high (1920x800, 3832x1600): the width decides.
+    if width >= 3800 or height >= 2000:
         return "2160p"
     if width > 1920 or height > 1080 or width < 1280:
         return f"{width}x{height}"
     return "1080p" if width > 1280 or height > 720 else "720p"
+
+
+def last_line(text: str) -> str:
+    """ffprobe prints the reason last; earlier lines carry memory addresses."""
+    lines = text.strip().splitlines()
+    return lines[-1] if lines else ""
 
 
 def _decimal(value: float) -> str:
@@ -2392,6 +2465,7 @@ def test_static_files_are_served(client: TestClient, path: str, content: str) ->
 ```python
 import json
 import re
+import unicodedata
 from collections.abc import Iterator
 from pathlib import Path
 from urllib.parse import quote
@@ -2427,6 +2501,7 @@ MOVIE_JSON = json.dumps(
                 "codec_type": "subtitle",
                 "codec_name": "hdmv_pgs_subtitle",
                 "tags": {"language": "por"},
+                "disposition": {"forced": 1},
             },
         ],
         "format": {"duration": "10680.0"},
@@ -2537,6 +2612,16 @@ def test_folder_page_before_scan(client: TestClient) -> None:
     assert response.status_code == 200
     assert "ainda não foi escaneada" in response.text
     assert 'hx-post="' in response.text
+    assert 'hx-disabled-elt="this"' in response.text
+    assert 'hx-sync="this:drop"' in response.text
+
+
+def test_folder_created_in_nfd_opens_by_its_nfc_url(client: TestClient, media: Path) -> None:
+    make_file(media / unicodedata.normalize("NFD", "Coração") / "a.mkv")
+
+    response = client.get(folder_url("Coração"))
+
+    assert response.status_code == 200
 
 
 def test_scan_returns_the_table_fragment(client: TestClient, probes: list[str]) -> None:
@@ -2552,6 +2637,7 @@ def test_scan_returns_the_table_fragment(client: TestClient, probes: list[str]) 
     assert "por 5.1" in text and "não definido estéreo" in text
     assert "2 (1 imagem)" in text  # PGS inside + external .srt
     assert "pt-BR" in text  # external subtitle in the details
+    assert "hdmv_pgs_subtitle" in text and "forçada" in text  # track details
     assert "2h58" in text
 
 
@@ -2618,12 +2704,15 @@ def test_scan_while_another_is_running_reports_it(client: TestClient, probes: li
     assert probes == []
 
 
-def test_lock_is_released_after_an_error(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    def missing(path: Path) -> ProbeResult:
-        raise FfprobeMissingError
+def test_lock_is_released_after_an_unexpected_error(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def boom(path: Path) -> ProbeResult:
+        raise RuntimeError("boom")
 
-    monkeypatch.setattr(library, "run_ffprobe", missing)
-    client.post(folder_url("Senhor dos Aneis") + "/scan")
+    monkeypatch.setattr(library, "run_ffprobe", boom)
+    with pytest.raises(RuntimeError):
+        client.post(folder_url("Senhor dos Aneis") + "/scan")
 
     assert not library._scan_lock.locked()
 
@@ -2706,6 +2795,7 @@ from projeto_dvd.api.formatting import (
     format_duration,
     format_fps,
     format_size,
+    last_line,
     video_label,
 )
 from projeto_dvd.config import Settings
@@ -2723,6 +2813,7 @@ templates.env.filters.update(
     fps=format_fps,
     aspect=format_aspect,
     video_label=video_label,
+    last_line=last_line,
 )
 
 # One scan at a time: ffprobe is heavy on a USB drive, and two scans of the same folder
@@ -2775,7 +2866,9 @@ def folder_page(
     request: Request, name: str, folder: FolderDep, session: SessionDep, media_dir: MediaDirDep
 ) -> HTMLResponse:
     view = folder_view(session, media_dir, name, folder)
-    return templates.TemplateResponse(request, "folder.html", {"folder": view})
+    # The body template is shared with the scan response: no scan result on a plain GET.
+    context = {"folder": view, "scan_error": None, "probed": None}
+    return templates.TemplateResponse(request, "folder.html", context)
 
 
 @router.post("/folders/{name}/scan", response_class=HTMLResponse, name="scan_folder")
@@ -2909,7 +3002,7 @@ Delete `src/projeto_dvd/web/templates/index.html`.
           hx-target="#folder-body" hx-swap="innerHTML"
           hx-disabled-elt="this" hx-sync="this:drop"
           hx-indicator="#folder-body, #scanning">Escanear</button>
-  <span id="scanning" class="scanning">Escaneando... (pode levar alguns minutos)</span>
+  <span id="scanning" class="scanning" role="status">Escaneando... (pode levar alguns minutos)</span>
 </header>
 <div id="folder-body">
   {% include "_folder_body.html" %}
@@ -2936,7 +3029,7 @@ Delete `src/projeto_dvd/web/templates/index.html`.
 <p class="empty">Nenhum vídeo nesta pasta.</p>
 {% elif folder.status.name == "NOT_SCANNED" %}
 <p class="empty">Esta pasta ainda não foi escaneada. O scan lê os dados técnicos de cada vídeo
-   com o ffprobe, sem alterar os arquivos.</p>
+   com o ffprobe, sem alterar os arquivos. Use o botão Escanear acima.</p>
 {% else %}
 <div class="table-wrap">
 <table class="files">
@@ -2952,7 +3045,7 @@ Delete `src/projeto_dvd/web/templates/index.html`.
     {% if file.error is not none %}
     <tr class="row-error">
       <td>{{ name }}</td>
-      <td colspan="7">Não foi possível ler o arquivo: {{ file.error }}</td>
+      <td colspan="7">Não foi possível ler o arquivo: {{ file.error | last_line }}</td>
     </tr>
     {% elif file.summary is none %}
     <tr>
@@ -2980,7 +3073,7 @@ Delete `src/projeto_dvd/web/templates/index.html`.
             <li>Legenda externa: {{ sub.language or "não definido" }} · {{ "imagem" if sub.image else "texto" }} · {{ sub.name }}</li>
             {% endfor %}
             {% for warning in file.warnings %}
-            <li class="warning-text">⚠ {{ warning }}</li>
+            <li class="warning-text"><span aria-hidden="true">&#x26A0;&#xFE0E;</span> {{ warning }}</li>
             {% endfor %}
           </ul>
         </details>
@@ -2995,7 +3088,7 @@ Delete `src/projeto_dvd/web/templates/index.html`.
       </td>
       <td class="numbers">{{ subtitle_count }}{% if images %} ({{ images }} imagem){% endif %}</td>
       <td class="numbers">{{ s.chapters }}</td>
-      <td>{% if file.warnings %}<span class="warning-icon" title="{{ file.warnings | join(', ') }}">⚠</span>{% endif %}</td>
+      <td>{% if file.warnings %}<span class="warning-icon" aria-hidden="true" title="{{ file.warnings | join(', ') }}">&#x26A0;&#xFE0E;</span><span class="sr-only">{{ file.warnings | join(', ') }}</span>{% endif %}</td>
     </tr>
     {% endif %}
   {% endfor %}
@@ -3048,7 +3141,14 @@ code, pre { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; }
 .folder-name { font-family: Georgia, serif; }
 .muted { color: var(--muted); }
 .numbers { font-variant-numeric: tabular-nums; }
-.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  white-space: nowrap;
+  clip-path: inset(50%);
+}
 
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
@@ -3140,7 +3240,7 @@ button.primary {
   cursor: pointer;
 }
 
-button.primary[disabled] { opacity: 0.5; cursor: progress; }
+button.primary[disabled] { background: var(--border); color: var(--muted); cursor: progress; }
 
 /* HTMX adds .htmx-request to the indicators while the scan runs. */
 .scanning { display: none; color: var(--muted); }
@@ -3166,6 +3266,7 @@ button.primary[disabled] { opacity: 0.5; cursor: progress; }
 
 .files {
   width: 100%;
+  min-width: 860px;
   border-collapse: collapse;
   font-size: 0.95rem;
 }
@@ -3180,6 +3281,8 @@ button.primary[disabled] { opacity: 0.5; cursor: progress; }
 
 .files th { color: var(--muted); font-weight: 600; white-space: nowrap; }
 .files td.numbers { white-space: nowrap; }
+/* Release names like The.Lord.of.the.Rings.2001.1080p.mkv have no spaces to break at. */
+.files td:first-child { min-width: 220px; max-width: 380px; overflow-wrap: anywhere; }
 
 .files summary { cursor: pointer; }
 .tracks { margin: 8px 0 0; padding-left: 16px; color: var(--muted); font-size: 0.85rem; }
