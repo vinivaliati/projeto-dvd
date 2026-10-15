@@ -430,8 +430,8 @@ não mudam; a Fase 3 vem antes da 2 para ter um disco de verdade o quanto antes.
       `.env.example`, Dockerfile com as ferramentas de mídia, docker-compose, CI, README inicial,
       agentes em `.claude/agents/`. Pronto quando: `docker compose up` sobe a página "hello" e o
       CI fica verde.
-- [ ] **Fase 1: Biblioteca.** Pasta de entrada com uma subpasta por disco, scan, ffprobe,
-      catálogo, tela de biblioteca e tela da pasta. (PR #3; marcar no merge.)
+- [x] **Fase 1: Biblioteca.** Pasta de entrada com uma subpasta por disco, scan, ffprobe,
+      catálogo, tela de biblioteca e tela da pasta.
 - [ ] **Fase 3: DVD mínimo.** 1 filme → ISO sem menu, com perfil DVD-5/DVD-9 escolhido, que passa
       no checklist. Pronto em duas etapas: agora, ISO validado no VLC; depois, o teste num player
       físico, quando o gravador for comprado.
@@ -481,7 +481,7 @@ _Atualizar ao fim de cada sessão._
   da pasta com a tabela dos vídeos, scan incremental com ffprobe, banco SQLite no volume `data`,
   testes `slow` dentro da imagem e smoke do CI ampliado. Cada task revisada pelos agentes antes do
   ok do Vini. `make lint`, `make test` (216 testes, 100% de cobertura) e `make test-slow` (7)
-  verdes. Revisão final da branch inteira: pronto para merge. PR #3 aberto; o merge é do Vini.
+  verdes. PR #3 mergeado em `main` com CI verde (`quality` e `docker`). Fase 1 concluída.
   **Próximo passo:** Fase 3 (DVD mínimo), começando por `/superpowers:brainstorm`.
 - Os agentes de `.claude/agents/` só são reconhecidos pelo nome a partir de uma sessão nova; na
   sessão em que foram criados, rodam como agente genérico lendo o próprio arquivo.
