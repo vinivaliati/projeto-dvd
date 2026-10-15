@@ -186,3 +186,23 @@ button.primary[disabled] { background: var(--border); color: var(--muted); curso
 .row-error td:first-child { border-left: 4px solid var(--error); }
 
 .warning-icon, .warning-text { color: var(--warning); }
+
+/* Buttons: one primary per screen; links styled as buttons share the look. */
+.button {
+  display: inline-block;
+  padding: 8px 20px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  font: 600 1rem system-ui, sans-serif;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.button.primary { background: var(--accent); color: #121212; }
+.button.secondary { background: var(--surface); border-color: var(--border); color: var(--text); }
+.button.secondary:hover { border-color: var(--muted); }
+.button[disabled] { background: var(--border); color: var(--muted); cursor: progress; }
+
+.nav { display: flex; gap: 16px; margin-bottom: 16px; color: var(--muted); }
+.nav a { color: var(--muted); text-decoration: none; }
+.nav a:hover, .nav a[aria-current="page"] { color: var(--text); }

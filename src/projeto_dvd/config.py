@@ -14,3 +14,5 @@ class Settings(BaseSettings):
     # Intermediate files (WSL ext4) and the final ISO (a Windows folder). Phase 3.
     work_dir: Path = Path("/work")
     output_dir: Path = Path("/output")
+    # Host names the app answers to (the port is published on 127.0.0.1 only).
+    allowed_hosts: list[str] = ["localhost", "127.0.0.1"]
