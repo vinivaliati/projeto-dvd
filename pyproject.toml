@@ -6,8 +6,11 @@ readme = "README.md"
 license = "MIT"
 requires-python = ">=3.12,<3.13"
 dependencies = [
+    "alembic>=1.20.0",
     "fastapi>=0.143.1",
     "jinja2>=3.1.6",
+    "pydantic-settings>=2.16.0",
+    "sqlmodel>=0.0.48",
     "uvicorn>=0.54.0",
 ]
 
@@ -39,5 +42,6 @@ files = ["src", "tests"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "--strict-markers --cov=projeto_dvd --cov-report=term-missing --cov-fail-under=90"
-markers = ["slow: integration tests that build real discs (run inside the Docker image)"]
+# "not slow" by default; "-m slow" on the command line wins (last -m applies).
+addopts = "--strict-markers -m 'not slow' --cov=projeto_dvd --cov-branch --cov-report=term-missing --cov-fail-under=90"
+markers = ["slow: integration tests that need the media toolchain (run inside the Docker image)"]
