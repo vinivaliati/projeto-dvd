@@ -1,0 +1,54 @@
+{
+    "streams": [
+        {
+            "index": 0,
+            "codec_name": "hevc",
+            "codec_type": "video",
+            "width": 3840,
+            "height": 2160,
+            "sample_aspect_ratio": "1:1",
+            "display_aspect_ratio": "16:9",
+            "pix_fmt": "yuv420p10le",
+            "r_frame_rate": "24000/1001",
+            "avg_frame_rate": "24000/1001",
+            "disposition": {"default": 1, "forced": 0, "attached_pic": 0},
+            "tags": {"language": "eng"},
+            "side_data_list": [
+                {
+                    "side_data_type": "DOVI configuration record",
+                    "dv_version_major": 1,
+                    "dv_version_minor": 0,
+                    "dv_profile": 5,
+                    "dv_level": 6,
+                    "rpu_present_flag": 1,
+                    "el_present_flag": 0,
+                    "bl_present_flag": 1,
+                    "dv_bl_signal_compatibility_id": 0,
+                    "dv_md_compression": 0
+                }
+            ]
+        },
+        {
+            "index": 1,
+            "codec_name": "truehd",
+            "codec_type": "audio",
+            "channels": 8,
+            "channel_layout": "7.1",
+            "disposition": {"default": 1, "forced": 0, "attached_pic": 0},
+            "tags": {"language": "eng"}
+        },
+        {
+            "index": 2,
+            "codec_name": "hdmv_pgs_subtitle",
+            "codec_type": "subtitle",
+            "disposition": {"default": 0, "forced": 0, "attached_pic": 0},
+            "tags": {"language": "por", "title": "Brazilian"}
+        }
+    ],
+    "chapters": [],
+    "format": {
+        "filename": "dv5_pgs.mkv",
+        "format_name": "matroska,webm",
+        "duration": "7200.000000"
+    }
+}
