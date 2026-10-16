@@ -6,7 +6,7 @@ even and no box is thinner than 2 lines, because the menu is shown interlaced.
 """
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Literal
 
 from projeto_dvd.planner.disc_plan import MenuItem, MenuPage
@@ -176,3 +176,16 @@ def _cut(text: str, width: float, size: int, measure: Measure) -> str:
 
 def _even(value: float) -> int:
     return round(value / 2) * 2
+
+
+def letterbox_layout(layout: PageLayout) -> PageLayout:
+    """The same buttons where a 4:3 TV shows a 16:9 menu (for the letterbox subpicture)."""
+
+    def move(box: Box) -> Box:
+        return Box(box.x0, letterbox_y(box.y0), box.x1, letterbox_y(box.y1))
+
+    buttons = tuple(
+        replace(button, box=move(button.box), marker=move(button.marker))
+        for button in layout.buttons
+    )
+    return replace(layout, buttons=buttons)
