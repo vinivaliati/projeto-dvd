@@ -236,3 +236,34 @@ def test_get_tmdb_gives_a_client_only_with_a_token(settings: Settings) -> None:
     for generator in (with_token, without):
         with pytest.raises(StopIteration):
             next(generator)
+
+
+def test_library_line_counts_confirmed(client: TestClient) -> None:
+    fid = file_id(client)
+    assert "TMDB:" not in client.get("/").text
+    client.post(f"/files/{fid}/choose", headers=SAME, data={"kind": "movie", "tmdb_id": "101"})
+
+    assert "TMDB: todos confirmados" in client.get("/").text
+
+
+def test_library_line_partial(client: TestClient, settings: Settings) -> None:
+    make_file(settings.media_dir / "Anel" / "Outro.mkv")
+    client.post("/folders/Anel/scan", headers=SAME)
+    client.post(f"/files/{file_id_of(client, 'Anel/Anel Mágico (2001).mkv')}/choose",
+                headers=SAME, data={"kind": "movie", "tmdb_id": "101"})  # fmt: skip
+
+    assert "TMDB: 1 de 2 confirmados" in client.get("/").text
+
+
+def test_footer_attribution(client: TestClient) -> None:
+    page = client.get("/").text
+
+    assert "Este produto usa a API do TMDB" in page
+    assert "/static/tmdb.svg" in page
+
+
+def file_id_of(client: TestClient, path: str) -> int:
+    with Session(client.app.state.engine) as session:  # type: ignore[attr-defined]
+        row = session.exec(select(MediaFile).where(MediaFile.path == path)).one()
+        assert row.id is not None
+        return row.id

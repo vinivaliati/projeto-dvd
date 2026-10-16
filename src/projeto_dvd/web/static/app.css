@@ -299,3 +299,7 @@ input[type="radio"], input[type="checkbox"] { accent-color: var(--text); }
   padding: 6px 8px; background: var(--bg); color: var(--text);
   border: 1px solid var(--border); border-radius: 4px; }
 .search-form input[type="search"] { min-width: 12em; }
+.ok-text { color: var(--ok); }
+footer.credits { max-width: 1100px; margin: 32px auto 16px; padding: 0 16px; font-size: 0.8rem;
+  display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; }
+footer.credits img { display: block; height: 12px; width: auto; }

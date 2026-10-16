@@ -431,3 +431,9 @@ def test_library_purges_a_removed_folder_when_others_exist(
 
     with Session(client.app.state.engine) as session:  # type: ignore[attr-defined]
         assert session.exec(select(MediaFile)).all() == []
+
+
+def test_library_line_hidden_without_token(client: TestClient, probes: list[str]) -> None:
+    client.post(folder_url("Senhor dos Aneis") + "/scan")
+
+    assert "TMDB:" not in client.get("/").text

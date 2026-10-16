@@ -15,5 +15,9 @@
     </nav>
     {% block content %}{% endblock %}
   </main>
+  <footer class="credits muted">
+    <a href="https://www.themoviedb.org/"><img src="{{ url_for('static', path='tmdb.svg') }}" alt="TMDB" width="91" height="12"></a>
+    <span>Este produto usa a API do TMDB, mas não é endossado nem certificado pelo TMDB.</span>
+  </footer>
 </body>
 </html>

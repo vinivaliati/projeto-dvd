@@ -23,6 +23,14 @@
       {% elif folder.status.name != "EMPTY" %}
       <span class="muted numbers">{{ folder.duration | duration }}</span>
       {% endif %}
+      {% set done = confirmed.get(folder.name, 0) %}
+      {% if tmdb_enabled and done %}
+      {% if done == folder.files | length %}
+      <span class="numbers ok-text">TMDB: todos confirmados</span>
+      {% else %}
+      <span class="muted numbers">TMDB: {{ done }} de {{ folder.files | length }} confirmados</span>
+      {% endif %}
+      {% endif %}
     </a>
   </li>
   {% endfor %}

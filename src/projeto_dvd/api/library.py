@@ -13,6 +13,7 @@ from projeto_dvd.jobs import store
 from projeto_dvd.library.files import list_disc_folders
 from projeto_dvd.library.probe import FfprobeMissingError, run_ffprobe
 from projeto_dvd.library.scan import folder_view, purge_missing_folders, scan_folder
+from projeto_dvd.metadata.curation import confirmed_counts
 
 router = APIRouter()
 
@@ -29,13 +30,21 @@ FFPROBE_MISSING = (
 
 
 @router.get("/", response_class=HTMLResponse, name="library")
-def library_page(request: Request, session: SessionDep, media_dir: MediaDirDep) -> HTMLResponse:
+def library_page(
+    request: Request, session: SessionDep, media_dir: MediaDirDep, settings: SettingsDep
+) -> HTMLResponse:
     folders = list_disc_folders(media_dir)
     # An unplugged drive lists nothing: purging then would wipe every confirmed match.
     if folders:
         purge_missing_folders(session, folders)
     views = [folder_view(session, media_dir, name, path) for name, path in folders.items()]
-    context = {"folders": views, "scanning": _scanning, "active": store.active_folders(session)}
+    context = {
+        "folders": views,
+        "scanning": _scanning,
+        "active": store.active_folders(session),
+        "tmdb_enabled": tmdb_enabled(settings),
+        "confirmed": confirmed_counts(session),
+    }
     return templates.TemplateResponse(request, "library.html", context)
 
 
