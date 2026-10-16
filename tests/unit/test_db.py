@@ -2,14 +2,15 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 
 import pytest
+from alembic import command
 from alembic.autogenerate import compare_metadata
 from alembic.migration import MigrationContext
-from sqlalchemy import Engine, inspect
+from sqlalchemy import Engine, inspect, text
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, SQLModel, select
 
-from projeto_dvd.db.models import MediaFile
-from projeto_dvd.db.session import is_migrated, make_engine, migrate
+from projeto_dvd.db.models import MediaFile, Title
+from projeto_dvd.db.session import _config, is_migrated, make_engine, migrate
 
 
 def make_row(path: str = "Disco/a.mkv") -> MediaFile:
@@ -95,4 +96,38 @@ def test_is_migrated(database_url: str) -> None:
     assert not is_migrated(engine)
     migrate(database_url)
     assert is_migrated(engine)
+    engine.dispose()
+
+
+def make_title(session: Session, status: str = "confirmed") -> MediaFile:
+    row = make_row()
+    row.title = Title(status=status, kind="movie", label="Anel (2001)", tmdb_id=101)
+    session.add(row)
+    session.commit()
+    return row
+
+
+def test_deleting_a_media_file_deletes_its_title(session: Session) -> None:
+    row = make_title(session)
+
+    session.delete(row)
+    session.commit()
+
+    assert session.exec(select(Title)).all() == []
+
+
+def test_migration_0003_keeps_existing_rows(database_url: str) -> None:
+    command.upgrade(_config(database_url), "0002")
+    engine = make_engine(database_url)
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO media_file (folder, path, size, mtime_ns, scanned_at)"
+                " VALUES ('F', 'F/a.mkv', 1, 1, '2026-10-16 00:00:00')"
+            )
+        )
+    migrate(database_url)
+    with Session(engine) as session:
+        assert len(session.exec(select(MediaFile)).all()) == 1
+        assert session.exec(select(Title)).all() == []
     engine.dispose()

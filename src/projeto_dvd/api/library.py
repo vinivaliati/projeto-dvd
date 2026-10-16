@@ -30,7 +30,9 @@ FFPROBE_MISSING = (
 @router.get("/", response_class=HTMLResponse, name="library")
 def library_page(request: Request, session: SessionDep, media_dir: MediaDirDep) -> HTMLResponse:
     folders = list_disc_folders(media_dir)
-    purge_missing_folders(session, folders)
+    # An unplugged drive lists nothing: purging then would wipe every confirmed match.
+    if folders:
+        purge_missing_folders(session, folders)
     views = [folder_view(session, media_dir, name, path) for name, path in folders.items()]
     context = {"folders": views, "scanning": _scanning, "active": store.active_folders(session)}
     return templates.TemplateResponse(request, "library.html", context)

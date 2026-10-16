@@ -6,9 +6,15 @@ from pathlib import Path
 import pytest
 from sqlmodel import Session, select
 
-from projeto_dvd.db.models import MediaFile
+from projeto_dvd.db.models import MediaFile, Title
 from projeto_dvd.library.probe import NO_VIDEO, READ_ERROR, FfprobeMissingError, ProbeResult
-from projeto_dvd.library.scan import Status, folder_view, purge_missing_folders, scan_folder
+from projeto_dvd.library.scan import (
+    CHANGED_FILE,
+    Status,
+    folder_view,
+    purge_missing_folders,
+    scan_folder,
+)
 from tests.tree import make_file, snapshot
 
 NOT_ROOT = pytest.mark.skipif(os.geteuid() == 0, reason="root ignores permissions")
@@ -346,3 +352,34 @@ def test_rows_from_other_folders_do_not_leak(session: Session, media: Path) -> N
     session.commit()
 
     assert folder_view(session, media, "Disco", media / "Disco").status == Status.NOT_SCANNED
+
+
+def test_changed_file_unconfirms_title(session: Session, media: Path) -> None:
+    scan(session, media, FakeProbe())
+    row = rows(session)["Disco/a.mkv"]
+    row.title = Title(status="confirmed", kind="movie", label="Anel (2001)", tmdb_id=101)
+    session.commit()
+
+    (media / "Disco" / "a.mkv").write_bytes(b"another disc")
+    scan(session, media, FakeProbe())
+
+    session.refresh(row)
+    assert row.title is not None
+    assert (row.title.status, row.title.message, row.title.tmdb_id) == (
+        "suggested",
+        CHANGED_FILE,
+        101,
+    )
+
+
+def test_unchanged_file_keeps_its_confirmation(session: Session, media: Path) -> None:
+    scan(session, media, FakeProbe())
+    row = rows(session)["Disco/a.mkv"]
+    row.title = Title(status="confirmed", kind="movie", label="Anel (2001)", tmdb_id=101)
+    row.error = "old error"  # probed again, but the file is the same
+    session.commit()
+
+    scan(session, media, FakeProbe())
+
+    session.refresh(row)
+    assert row.title is not None and row.title.status == "confirmed"

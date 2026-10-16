@@ -1,9 +1,10 @@
 """Database tables."""
 
 from datetime import datetime
+from typing import Optional
 
 from sqlalchemy import Index, text
-from sqlmodel import Field, SQLModel
+from sqlmodel import Field, Relationship, SQLModel
 
 
 class MediaFile(SQLModel, table=True):
@@ -26,6 +27,11 @@ class MediaFile(SQLModel, table=True):
     # ffprobe error (truncated stderr) when the file could not be read.
     error: str | None = None
     scanned_at: datetime
+    # One TMDB match per video; deleting the video row (scan, purge) deletes it too. ORM
+    # cascade, not PRAGMA foreign_keys: a future Alembic batch copy cannot wipe the titles.
+    title: Optional["Title"] = Relationship(
+        sa_relationship_kwargs={"uselist": False, "cascade": "all, delete-orphan"}
+    )
 
 
 class Job(SQLModel, table=True):
@@ -55,3 +61,21 @@ class Job(SQLModel, table=True):
     created_at: datetime
     started_at: datetime | None = None
     finished_at: datetime | None = None
+
+
+class Title(SQLModel, table=True):
+    """The TMDB match of one video: a suggestion until the Vini confirms it."""
+
+    __tablename__ = "title"
+
+    media_file_id: int | None = Field(default=None, foreign_key="media_file.id", primary_key=True)
+    status: str  # suggested, doubtful, confirmed, not_found
+    kind: str  # movie or episode
+    tmdb_id: int | None = None  # the movie, or the show of an episode
+    season: int | None = None
+    episode: int | None = None
+    episode_end: int | None = None  # a file with two episodes
+    label: str = ""  # what the card shows; a suggestion has no tmdb_json yet
+    poster_path: str | None = None  # TMDB path, for the thumbnail
+    message: str | None = None  # warning or the reason of not_found (Portuguese)
+    tmdb_json: str | None = None  # stored details (Details), only when confirmed

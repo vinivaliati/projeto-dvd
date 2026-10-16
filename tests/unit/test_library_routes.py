@@ -1,6 +1,7 @@
 import html
 import json
 import re
+import shutil
 import unicodedata
 from collections.abc import Iterator
 from pathlib import Path
@@ -8,10 +9,12 @@ from urllib.parse import quote
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlmodel import Session, select
 
 from projeto_dvd.api import library
 from projeto_dvd.app import create_app
 from projeto_dvd.config import Settings
+from projeto_dvd.db.models import MediaFile
 from projeto_dvd.library.probe import ABOVE_1080P, HDR, FfprobeMissingError, ProbeResult
 from tests.client import client_for
 from tests.tree import make_file, snapshot
@@ -147,6 +150,7 @@ def test_library_purges_rows_of_removed_folders(
     client: TestClient, media: Path, probes: list[str]
 ) -> None:
     client.post(folder_url("Senhor dos Aneis") + "/scan")
+    make_file(media / "Outra" / "a.mkv")  # with no folder at all, nothing is purged
     for file in (media / "Senhor dos Aneis").iterdir():
         file.unlink()
     (media / "Senhor dos Aneis").rmdir()
@@ -402,3 +406,28 @@ def test_hdr_and_above_1080p_are_flagged(
         assert f"</span> {warning}</li>" in response.text
     assert 'class="warning-icon"' in response.text
     assert "1 arquivo com aviso" in response.text
+
+
+def test_library_without_drive_keeps_the_rows(
+    client: TestClient, probes: list[str], media: Path
+) -> None:
+    client.post(folder_url("Senhor dos Aneis") + "/scan")
+    shutil.rmtree(media)  # the drive is unplugged: /media is empty
+
+    client.get("/")
+
+    with Session(client.app.state.engine) as session:  # type: ignore[attr-defined]
+        assert len(session.exec(select(MediaFile)).all()) == 1
+
+
+def test_library_purges_a_removed_folder_when_others_exist(
+    client: TestClient, probes: list[str], media: Path
+) -> None:
+    client.post(folder_url("Senhor dos Aneis") + "/scan")
+    make_file(media / "Outra" / "a.mkv")
+    shutil.rmtree(media / "Senhor dos Aneis")
+
+    client.get("/")
+
+    with Session(client.app.state.engine) as session:  # type: ignore[attr-defined]
+        assert session.exec(select(MediaFile)).all() == []
