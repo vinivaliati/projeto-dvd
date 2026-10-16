@@ -100,7 +100,7 @@ def _list_pages(kind: Kind, plays: list[MenuItem], heading: str) -> list[MenuPag
                     BACK,
                     following if number < len(chunks) else None,
                 ),
-            )  # fmt: skip
+            )
         )
     return pages
 
