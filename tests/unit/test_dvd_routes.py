@@ -470,5 +470,6 @@ def test_a_series_lists_its_pages(client: TestClient) -> None:
     page = client.get("/folders/Dois/dvd").text
 
     assert "menu.png?page=1&amp;v=" in response.text and "Lista 1" in response.text
-    for name in ("Principal", "Lista 1", "Áudio 2", "Legendas 2"):
+    for name in ("Principal", "Lista 1", "Áudio: Inglês", "Legendas: Sem legenda",
+                 "Legendas: Português"):  # fmt: skip
         assert name in page

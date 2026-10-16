@@ -331,18 +331,16 @@ def _menu_labels(ordered: Sequence[DiscTitle], menu: MenuPlan) -> list[str]:
 
 
 def _page_names(menu: MenuPlan) -> list[str]:
+    """How the page selector names each page; the language pages say which option is on."""
     names = []
-    lists = audio = subtitles = 0
+    lists = 0
     for page in menu.pages:
         if page.kind == "main":
             names.append("Principal")
         elif page.kind == "list":
             lists += 1
             names.append(f"Lista {lists}")
-        elif page.kind == "audio":
-            audio += 1
-            names.append(f"Áudio {audio}")
         else:
-            subtitles += 1
-            names.append(f"Legendas {subtitles}")
+            assert page.checked is not None
+            names.append(f"{page.heading}: {page.items[page.checked].label}")
     return names
