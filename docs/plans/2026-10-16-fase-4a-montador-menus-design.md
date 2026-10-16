@@ -4,7 +4,8 @@
 - **Branch:** `feat/fase-4a-montador-menus`
 - **Status:** abordagem aprovada pelo Vini no chat; revisada por `tech-lead-midia` (com testes
   na imagem: dvdauthor, IFO/PCI e navegação simulada na libdvdnav), `designer` e
-  `revisor-codigo`, achados incorporados; aguardando a revisão do Vini.
+  `revisor-codigo`, achados incorporados; aprovada pelo Vini (com as páginas separadas de Áudio
+  e Legendas, com ✓).
 
 ## Contexto e intenção
 
@@ -64,6 +65,7 @@ anos (DVD-Video à risca), uma criança ou um idoso navega só com o controle, e
 - Série: "Tocar todos" + lista de episódios; um episódio escolhido **continua** até o fim do disco.
 - Faixas **por idioma, no disco**, com aviso para o título sem aquele idioma.
 - Tema **automático + 3 ajustes**: fundo, cor de destaque, lado dos botões, com preview.
+- Idiomas em duas páginas, "Áudio" e "Legendas", com ✓ no item ativo (proposta do `designer`).
 - Autonomia: depois de aprovar esta spec, o plano é escrito e executado até o fim sem parar.
 
 ## Dependências
