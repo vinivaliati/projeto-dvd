@@ -1,0 +1,43 @@
+<li class="title-card" id="title-{{ card.file_id }}" aria-live="polite">
+  <form class="search-form" hx-post="{{ url_for('search_title', file_id=card.file_id) }}"
+        hx-target="closest li" hx-swap="outerHTML">
+    <div class="file-name muted">{{ card.name }}</div>
+    <fieldset class="kind">
+      <legend class="sr-only">Tipo</legend>
+      <label><input type="radio" name="kind" value="movie" {{ "checked" if query.kind == "movie" }}> Filme</label>
+      <label><input type="radio" name="kind" value="episode" {{ "checked" if query.kind == "episode" }}> Série</label>
+    </fieldset>
+    <label>Nome <input type="search" name="q" value="{{ query.q }}" required></label>
+    <label>Ano <input name="year" inputmode="numeric" size="4" value="{{ query.year or '' }}"></label>
+    <label class="episode-only">Temporada <input name="season" inputmode="numeric" size="2" value="{{ '' if query.season is none else query.season }}"></label>
+    <label class="episode-only">Episódio <input name="episode" inputmode="numeric" size="3" value="{{ '' if query.episode is none else query.episode }}"></label>
+    <button class="button small secondary" type="submit">Buscar</button>
+    <button class="button small secondary" type="button"
+            hx-get="{{ url_for('title_card', file_id=card.file_id) }}"
+            hx-target="closest li" hx-swap="outerHTML">Cancelar</button>
+    {% if card_error %}<p class="error-text" role="alert">{{ card_error }}</p>{% endif %}
+    <ul class="results">
+      {% for result in results %}
+      <li>
+        {# The kind of this search, not the radio now: show and movie ids overlap on TMDB. #}
+        <button type="button" name="tmdb_id" value="{{ result.id }}" hx-vals='{{ {"kind": query.kind} | tojson }}'
+                hx-post="{{ url_for('choose_title', file_id=card.file_id) }}"
+                hx-target="closest li.title-card" hx-swap="outerHTML" hx-disabled-elt="this">
+          {% if result.poster_path %}
+          <img class="thumb" src="https://image.tmdb.org/t/p/w92{{ result.poster_path }}" width="46" height="69" loading="lazy" alt="">
+          {% else %}
+          <span class="thumb" aria-hidden="true"></span>
+          {% endif %}
+          <span>
+            <strong>{{ result.display_title }}{% if result.year %} ({{ result.year }}){% endif %}</strong>
+            {% if result.original and result.original != result.display_title %}<span class="muted">{{ result.original }}</span>{% endif %}
+            <span class="muted overview">{{ result.overview | truncate(120, true, "...", 0) }}</span>
+          </span>
+        </button>
+      </li>
+      {% else %}
+      {% if not card_error %}<li class="muted">Nada encontrado. Tente outro nome ou o título original.</li>{% endif %}
+      {% endfor %}
+    </ul>
+  </form>
+</li>

@@ -6,12 +6,14 @@ from datetime import UTC, datetime
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 
-from projeto_dvd.api.deps import FolderDep, MediaDirDep, SessionDep, templates
+from projeto_dvd.api.curation import tmdb_context, tmdb_enabled
+from projeto_dvd.api.deps import FolderDep, MediaDirDep, SessionDep, SettingsDep, templates
 from projeto_dvd.api.dvd import dvd_state
 from projeto_dvd.jobs import store
 from projeto_dvd.library.files import list_disc_folders
 from projeto_dvd.library.probe import FfprobeMissingError, run_ffprobe
 from projeto_dvd.library.scan import folder_view, purge_missing_folders, scan_folder
+from projeto_dvd.metadata.curation import confirmed_counts
 
 router = APIRouter()
 
@@ -28,17 +30,32 @@ FFPROBE_MISSING = (
 
 
 @router.get("/", response_class=HTMLResponse, name="library")
-def library_page(request: Request, session: SessionDep, media_dir: MediaDirDep) -> HTMLResponse:
+def library_page(
+    request: Request, session: SessionDep, media_dir: MediaDirDep, settings: SettingsDep
+) -> HTMLResponse:
     folders = list_disc_folders(media_dir)
-    purge_missing_folders(session, folders)
+    # An unplugged drive lists nothing: purging then would wipe every confirmed match.
+    if folders:
+        purge_missing_folders(session, folders)
     views = [folder_view(session, media_dir, name, path) for name, path in folders.items()]
-    context = {"folders": views, "scanning": _scanning, "active": store.active_folders(session)}
+    context = {
+        "folders": views,
+        "scanning": _scanning,
+        "active": store.active_folders(session),
+        "tmdb_enabled": tmdb_enabled(settings),
+        "confirmed": confirmed_counts(session),
+    }
     return templates.TemplateResponse(request, "library.html", context)
 
 
 @router.get("/folders/{name}", response_class=HTMLResponse, name="folder")
 def folder_page(
-    request: Request, name: str, folder: FolderDep, session: SessionDep, media_dir: MediaDirDep
+    request: Request,
+    name: str,
+    folder: FolderDep,
+    session: SessionDep,
+    media_dir: MediaDirDep,
+    settings: SettingsDep,
 ) -> HTMLResponse:
     view = folder_view(session, media_dir, name, folder)
     # The body template is shared with the scan response: no scan result on a plain GET.
@@ -49,13 +66,19 @@ def folder_page(
         "scanning": _scanning,
         "dvd": dvd_state(session, view),
         "now": datetime.now(UTC),
+        "tmdb": tmdb_context(session, view, tmdb_enabled(settings)),
     }
     return templates.TemplateResponse(request, "folder.html", context)
 
 
 @router.post("/folders/{name}/scan", response_class=HTMLResponse, name="scan_folder")
 def scan(
-    request: Request, name: str, folder: FolderDep, session: SessionDep, media_dir: MediaDirDep
+    request: Request,
+    name: str,
+    folder: FolderDep,
+    session: SessionDep,
+    media_dir: MediaDirDep,
+    settings: SettingsDep,
 ) -> HTMLResponse:
     """Scan synchronously (sync route: runs in the thread pool) and return the folder body."""
     global _scanning
@@ -81,5 +104,6 @@ def scan(
         "scanning": _scanning,
         "dvd": dvd_state(session, view),
         "now": datetime.now(UTC),
+        "tmdb": tmdb_context(session, view, tmdb_enabled(settings)),
     }
     return templates.TemplateResponse(request, "_folder_body.html", context)

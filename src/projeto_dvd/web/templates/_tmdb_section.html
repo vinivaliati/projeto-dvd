@@ -1,0 +1,34 @@
+<section id="tmdb" class="tmdb" aria-labelledby="tmdb-title">
+  <h2 id="tmdb-title">Match no TMDB</h2>
+  {% if not tmdb.enabled %}
+  <p class="banner">Curadoria desligada. Para buscar os filmes no TMDB, coloque o token em
+     <code>TMDB_TOKEN</code> no <code>.env</code> e rode <code>docker compose up -d</code>.
+     <a href="https://www.themoviedb.org/settings/api">Criar o token no TMDB</a></p>
+  {% elif not tmdb.cards %}
+  <p class="muted">Escaneie a pasta para buscar no TMDB.</p>
+  {% else %}
+  <div class="actions tmdb-actions">
+    <button class="button secondary" type="button"
+            hx-post="{{ url_for('match_folder', name=folder.name | urlencode) }}"
+            hx-target="#tmdb" hx-swap="outerHTML"
+            hx-disabled-elt="#tmdb .tmdb-actions button" hx-sync="#tmdb:drop"
+            hx-indicator="#tmdb-busy">Buscar no TMDB</button>
+    {% if tmdb.cards | selectattr("status", "equalto", "suggested") | list %}
+    <button class="button secondary" type="button"
+            hx-post="{{ url_for('confirm_folder', name=folder.name | urlencode) }}"
+            hx-target="#tmdb" hx-swap="outerHTML"
+            hx-disabled-elt="#tmdb .tmdb-actions button" hx-sync="#tmdb:drop"
+            hx-indicator="#tmdb-busy">Confirmar todas as sugestões</button>
+    {% endif %}
+    <span id="tmdb-busy" class="scanning" role="status">Falando com o TMDB e baixando artes... (pode levar alguns minutos)</span>
+  </div>
+  {% endif %}
+  {% if tmdb.banner %}<p class="banner banner-ok" role="status">{{ tmdb.banner }}</p>{% endif %}
+  {% if tmdb.error %}<p class="banner banner-error" role="alert">{{ tmdb.error }}</p>{% endif %}
+  {% if tmdb.cards %}
+  <ul class="title-cards">
+    {% set enabled = tmdb.enabled %}
+    {% for card in tmdb.cards %}{% include "_title_card.html" %}{% endfor %}
+  </ul>
+  {% endif %}
+</section>

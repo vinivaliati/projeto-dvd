@@ -1,4 +1,3 @@
-{% include "_dvd_block.html" %}
 <p class="muted numbers">
   {{ folder.files | length }} vídeo{{ "s" if folder.files | length != 1 }} · {{ folder.size | size }}{% if folder.duration is not none %} · {{ folder.duration | duration }}{% endif %}
 </p>
@@ -14,6 +13,7 @@
 {% if folder.warning_count %}
 <p class="banner banner-warning">{{ folder.warning_count }} arquivo{{ "s" if folder.warning_count != 1 }} com aviso</p>
 {% endif %}
+{% if folder.status.name != "EMPTY" %}{% include "_tmdb_section.html" %}{% endif %}
 {% if folder.status.name == "EMPTY" %}
 <p class="empty">Nenhum vídeo nesta pasta. Pastas de DVD copiadas (VIDEO_TS) não são lidas:
    use um arquivo de vídeo por título, por exemplo um .mkv do MakeMKV.</p>
@@ -87,3 +87,4 @@
 </table>
 </div>
 {% endif %}
+{% include "_dvd_block.html" %}

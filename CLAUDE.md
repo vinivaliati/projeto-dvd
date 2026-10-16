@@ -114,10 +114,14 @@ Uma tarefa só está pronta quando:
 - Sugerir automaticamente filme, série, temporada e episódio pelo nome do arquivo
   (ex: `S01E03`, `1x03`, ano entre parênteses), confirmando no **TMDB**.
 - Permitir corrigir o match manualmente pela busca.
+- O app sugere e o Vini confirma (Fase 2): **Sugestão** quando o título (e o ano) bate exatamente
+  com um resultado só; **Confira** quando é ambíguo, e esse nunca é confirmado em lote.
 - Agrupar em **coleções** (ex: "O Senhor dos Anéis", "Friends: Temporada 1"). Usar a "collection"
-  do TMDB quando existir.
+  do TMDB quando existir. Fase 2: sem tabela de coleções; o id e o nome da collection ficam nos
+  detalhes do título, para a Fase 7.
 - Baixar as artes para uma pasta local (pôster, fundo, logo, still de episódio) e salvar sinopse,
-  elenco, ano e duração. Idioma preferido `pt-BR`, com fallback para `en`.
+  elenco, ano e duração. Idioma preferido `pt-BR`, com fallback para `en`. Fase 2: um conjunto
+  padrão por título; escolher entre várias artes fica para a Fase 5.
 
 ### 3.3 Montador de disco (núcleo do app)
 
@@ -270,7 +274,7 @@ validado com teste antes de virar padrão.
 | Jobs | tabela `jobs` no SQLite + processo worker separado. Sem Celery/Redis a menos que fique necessário |
 | Mídia | `ffmpeg`/`ffprobe`, `dvdauthor`, `spumux`, `genisoimage`, `tsMuxeR`, `xorriso` |
 | Imagens e PDF | **Pillow** para menus e artes; **reportlab** para o PDF de impressão |
-| Metadados | **TMDB API** via `httpx`, com cache local das respostas |
+| Metadados | **TMDB API** via `httpx2` (token no cabeçalho `Bearer`), detalhes confirmados guardados no banco |
 | Infra | **Docker** + **docker-compose**; CI no **GitHub Actions** |
 
 ### 6.1 Variáveis de ambiente (`.env`, nunca commitar; manter `.env.example`)
@@ -291,8 +295,8 @@ WORK_DIR=/work                  # Fase 3; intermediários e logs dos jobs
 OUTPUT_DIR=/output              # Fase 3; ISOs em OUTPUT_DIR/iso
 ALLOWED_HOSTS=["localhost","127.0.0.1"]   # Fase 3; hosts aceitos (TrustedHost)
 HOST_OUTPUT_DIR=                # Fase 3; o compose repassa ao web só para mostrar o caminho do ISO no Windows
-TMDB_API_KEY=                   # Fase 2
-TMDB_LANGUAGE=pt-BR             # Fase 2
+TMDB_TOKEN=                     # Fase 2; o "Token de leitura da API" (Bearer); vazio desliga a curadoria
+TMDB_LANGUAGE=pt-BR             # Fase 2; o compose repassa as duas só ao web
 ```
 
 ### 6.2 Docker
@@ -317,7 +321,7 @@ src/projeto_dvd/
   api/            # rotas FastAPI (fragments HTMX), deps compartilhadas, mesma origem
   web/            # templates Jinja, estáticos
   library/        # scan, ffprobe, detecção de legendas externas
-  metadata/       # cliente TMDB, parser de nome de arquivo, matching, download de artes
+  metadata/       # parser de nomes, modelos e cliente TMDB, matching, artes, curadoria (banco e disco)
   planner/        # perfis, calculadora, fontes suportadas, plano do disco (dvd_plan), divisor de série
   encode/         # comandos ffmpeg por perfil (funções puras); mpeg2.py: soft pulldown e leitura
   authoring/
@@ -349,8 +353,11 @@ Em paralelo: `artes → composição da capa → PDF`.
 - `MediaFile` (tabela `media_file`, Fase 1): arquivo físico; pasta do disco, caminho, tamanho,
   `mtime_ns`, saída bruta do ffprobe (`probe_json`) ou o erro. Resumo, faixas e avisos são
   calculados na hora a partir do JSON (sem tabelas de faixas e sem `SourceFolder` por enquanto).
-- `Title`: filme ou episódio; `tmdb_id`, tipo, temporada/episódio, nome, sinopse, duração; ligado a 1 `MediaFile`.
-- `Collection`: agrupamento (franquia ou temporada), com tema visual.
+- `Title` (tabela `title`, Fase 2): 1 para 1 com `MediaFile` (a chave é o `media_file_id`, cascade
+  pelo ORM); status (`suggested`, `doubtful`, `confirmed`, `not_found`), tipo, `tmdb_id`,
+  temporada/episódio, o `label` da tela e os detalhes do TMDB inteiros em `tmdb_json` (nome,
+  sinopse, elenco, duração e collection calculados na hora).
+- `Collection`: agrupamento (franquia ou temporada), com tema visual. Adiada para a Fase 7.
 - `DiscProject`: um disco; **perfil escolhido**, títulos em ordem, faixas selecionadas, capítulos, tema do menu, status.
 - `DiscSet`: box com vários `DiscProject` (cada um com o próprio perfil).
 - `Job` (tabela `job`, Fase 3): uma geração de disco; o `DvdPlan` inteiro em `plan_json` (no
@@ -361,9 +368,10 @@ Em paralelo: `artes → composição da capa → PDF`.
 
 ### 7.2 Telas
 1. **Biblioteca** (Fase 1): um card por pasta de disco, com status (vazia, não escaneada, ok,
-   com avisos, mudou). A **tela da pasta** mostra a tabela dos vídeos e o botão Escanear. Status
-   de match e filtros entram na Fase 2.
-2. **Título**: dados técnicos, match TMDB (buscar/corrigir), artes.
+   com avisos, mudou). A **tela da pasta** mostra a tabela dos vídeos e o botão Escanear. Fase 2:
+   o cartão da pasta mostra quantos vídeos têm match confirmado (filtros ficam para depois).
+2. **Título**: dados técnicos, match TMDB (buscar/corrigir), artes. Fase 2: o match fica na tela
+   da pasta, numa lista de cartões acima da tabela técnica (sem tela própria por enquanto).
 3. **Coleções**: criar, agrupar, definir tema.
 4. **Montador de disco**: títulos, **seletor de perfil**, calculadora, ordem, capítulos, áudio/legenda.
 5. **Box**: discos do conjunto, perfil de cada um, numeração.
@@ -398,7 +406,8 @@ CLAUDE.md, inclusive a regra do travessão.
   argumentos gerada, sem rodar o ffmpeg), geração do XML do dvdauthor, layout de capa (medidas).
 - **Integração**: gerar clipes de 10 a 30 s com `ffmpeg -f lavfi` (testsrc + sine), montar um
   disco de verdade e validar a estrutura. Marcar como `@pytest.mark.slow` e rodar no CI.
-- **TMDB**: mockar com `respx`; nunca chamar a API real nos testes.
+- **TMDB**: mockar com `httpx2.MockTransport` (o `respx` mocka o `httpx`, não o `httpx2`); nunca
+  chamar a API real nos testes; JSON de teste inventado, nunca copiado de respostas reais.
 - **Checklist de QA do ISO** (agente `qa`), antes de gravar qualquer disco:
   1. tamanho do ISO ≤ capacidade física da mídia (reprova); acima da capacidade útil de 97%
      só avisa;
@@ -421,8 +430,9 @@ CLAUDE.md, inclusive a regra do travessão.
   Blu-ray menor e mais baixa; label de disco com 120 mm de diâmetro e furo central. As medidas
   ficam num arquivo de configuração, nunca hardcoded.
 - Texto da capa em português; usar a sinopse `pt-BR` do TMDB.
-- Pasta de artes: `OUTPUT_DIR/covers/<colecao>/<titulo>/` com `poster.jpg`, `backdrop.jpg`,
-  `logo.png`, `metadata.json`. PDFs em `OUTPUT_DIR/print/`.
+- Pasta de artes (Fase 2): `OUTPUT_DIR/covers/<pasta do disco>/<Título (ano)>/` com `poster.jpg`,
+  `backdrop.jpg`, `logo.png`, `metadata.json`; episódios em `<Série>/` com `S01E03.jpg` e
+  `S01E03.json`. Nomes saneados para o Windows. PDFs em `OUTPUT_DIR/print/`.
 
 ---
 
@@ -458,7 +468,8 @@ não mudam; a Fase 3 vem antes da 2 para ter um disco de verdade o quanto antes.
       no checklist. Inclui a calculadora de um título, a escolha de faixas e os jobs com
       progresso (worker). Pronto em duas etapas: agora, ISO validado no VLC; depois, o teste num
       player físico, quando o gravador for comprado.
-- [ ] **Fase 2: Curadoria.** Parser de nomes, TMDB, correção manual, coleções, download de artes.
+- [ ] **Fase 2: Curadoria.** Parser de nomes, TMDB, correção manual, download de artes (coleções
+      na Fase 7). Implementada; falta a QA com o token real, no final do projeto.
 - [ ] **Fase 4: Montador + menus DVD.** Vários títulos, episódios, menus com tema, submenus de
       áudio/legenda, retomar job e reaproveitar encode, copiar o vídeo de rip de DVD sem
       recodificar.
@@ -486,6 +497,9 @@ não mudam; a Fase 3 vem antes da 2 para ter um disco de verdade o quanto antes.
 - **HDR/4K, PGS, VobSub, PAL:** fora da Fase 3; a receita de tonemap do `tech-lead-midia` está na
   spec da Fase 3.
 - **Medidas exatas das capas e do label:** confirmar com o material comprado.
+- **TMDB com o token real** (QA no final): a busca ignora acento ("Senhor dos Aneis" acha "Senhor
+  dos Anéis")? O nome do episódio pt-BR vem mesmo como "Episódio N" quando falta tradução?
+  Pôsteres `pt` incluem os de Portugal (o TMDB não separa o país).
 - **NTSC vs PAL:** padrão NTSC; confirmar com o player que vai ser usado.
 
 ---
@@ -513,11 +527,18 @@ _Atualizar ao fim de cada sessão._
   um vídeo vira um ISO de DVD-Video sem menu (DVD-5 ou DVD-9), gerado pelo serviço `worker` com
   progresso, cancelamento e QA automática; formulário "Gerar DVD" com sugestões, tela do job e
   lista de jobs. 17 tasks, cada uma revisada pelos agentes. `make lint` e `make test` (560
-  testes, 100% de cobertura) verdes; smoke de ponta a ponta no CI. Falta: `make test-slow`
-  final, PR e a **QA manual com um filme real no VLC** (primeira etapa do pronto); depois, o
-  teste no player físico quando o gravador for comprado.
+  testes, 100% de cobertura), `make test-slow` (15) e o smoke de ponta a ponta no CI verdes. PR
+  #4 mergeado em `main`. Falta a **QA manual com um filme real no VLC** (o Vini testa tudo no
+  final do projeto); depois, o teste no player físico quando o gravador for comprado.
   Pequenos adiados: idiomas mostrados como código ("eng") em vez do nome; o botão "Escanear"
   continua primário depois de um scan na mesma página.
+- 2026-10-16: **Fase 2 implementada** na branch `feat/fase-2-curadoria` (spec e plano em
+  `docs/plans/2026-10-16-fase-2-curadoria*.md`, revisados por `curador`, `revisor-codigo` e
+  `designer`). Na tela da pasta, "Buscar no TMDB" sugere um filme ou episódio por vídeo (parser de
+  nomes de release, MakeMKV e português), o Vini confirma ou corrige pela busca, e a confirmação
+  baixa as artes padrão para `OUTPUT_DIR/covers/`. Sem token, a tela explica como configurar.
+  O "Gerar DVD" usa o idioma original do TMDB. `make lint` e `make test` verdes com 100% de
+  cobertura. Falta a QA com o token real (no final do projeto, decisão do Vini).
 - Os agentes de `.claude/agents/` só são reconhecidos pelo nome a partir de uma sessão nova; na
   sessão em que foram criados, rodam como agente genérico lendo o próprio arquivo.
 
@@ -614,3 +635,27 @@ _Atualizar ao fim de cada sessão._
 - 2026-10-16 (Fase 3): tela do job com tempos relativos ("há 12 min"): o container é UTC sem
   `tzdata`. Tempo de encode estimado pela duração (×0,2 em HD, ×0,1 em SD), a calibrar com um
   filme real.
+- 2026-10-16 (Fase 2): curadoria na tela da pasta: sugestão automática por vídeo, o Vini confirma
+  ou corrige; status "Confira" para o ambíguo, nunca confirmado em lote. Nome genérico ao lado de
+  outros vídeos também vira "Confira" (costuma ser um extra).
+- 2026-10-16 (Fase 2): sem tabela de coleções até a Fase 7; sem distribuição automática dos filmes
+  de uma collection entre arquivos de nome genérico (frágil).
+- 2026-10-16 (Fase 2): `httpx2` como cliente do TMDB, com o "Token de leitura da API" no cabeçalho
+  `Bearer` (a URL nunca leva segredo; o `httpx2` loga URLs); `TMDB_TOKEN` no lugar de
+  `TMDB_API_KEY`, `SecretStr` no `Settings`; `MockTransport` nos testes no lugar do `respx`. Fecha
+  o item da Fase 0 sobre qual cliente usar.
+- 2026-10-16 (Fase 2): detalhes do TMDB inteiros no banco (`tmdb_json`), dados da tela calculados
+  na hora; `title` 1 para 1 com `media_file`, cascade pelo ORM (sem `PRAGMA foreign_keys`, que
+  apagaria os títulos num batch do Alembic).
+- 2026-10-16 (Fase 2): o purge da biblioteca não roda com a pasta de entrada ausente ou vazia (HD
+  desligado não apaga nenhum match); um arquivo que mudou volta de "confirmado" para "Confira"
+  (pode ser outro filme com o mesmo nome; nunca reconfirmado em lote).
+- 2026-10-16 (Fase 2): artes padrão por título em `OUTPUT_DIR/covers/<pasta>/`, gravadas como
+  `.part` e renomeadas; caminho de imagem validado, sem redirecionamento, só `image/*`, até 30 MB.
+  Arte que falha não desfaz a confirmação. Escolha entre várias na Fase 5.
+- 2026-10-16 (Fase 2): rede primeiro, depois uma transação curta por título; um lock por processo
+  para as ações do TMDB; rotas com formulário são `async` e rodam o TMDB no thread pool.
+- 2026-10-16 (Fase 2): nome em inglês quando falta a tradução pt-BR (filme pelas `translations`;
+  episódio por uma segunda chamada da temporada em `en-US`, só quando precisa).
+- 2026-10-16 (Fase 2): atribuição do TMDB no rodapé de todas as páginas, com o logo oficial "blue
+  short" versionado, e no README com a frase oficial e o uso não comercial.

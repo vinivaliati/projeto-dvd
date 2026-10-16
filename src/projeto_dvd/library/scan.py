@@ -14,6 +14,7 @@ from projeto_dvd.library.files import VideoFile, find_videos
 from projeto_dvd.library.probe import READ_ERROR, ProbeResult, Summary, summarize
 
 Prober = Callable[[Path], ProbeResult]
+CHANGED_FILE = "O arquivo mudou desde a confirmação. Confira antes de confirmar de novo."
 
 
 class Status(StrEnum):
@@ -71,6 +72,9 @@ def scan_folder(session: Session, media_dir: Path, name: str, folder: Path, prob
                 session.commit()
             continue
         row = row or MediaFile(folder=name, path=video.path, size=0, mtime_ns=0, scanned_at=_now())
+        if row.title is not None and row.title.status == "confirmed" and not _unchanged(row, video):
+            # MakeMKV repeats title_t00.mkv across discs: a new file needs a new look.
+            row.title.status, row.title.message = "doubtful", CHANGED_FILE
         # The stat from before ffprobe: a file still being copied will look changed next time.
         row.size, row.mtime_ns = video.size, video.mtime_ns
         row.probe_json, row.error, row.scanned_at = result.json, result.error, _now()

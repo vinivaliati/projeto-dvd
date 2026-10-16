@@ -69,6 +69,10 @@ jobs:
           curl -fsS -X POST "http://127.0.0.1:8000/folders/Disco%20Teste/scan" -o scan.html
           grep -q "Não foi possível ler o arquivo" scan.html
           curl -fsS http://127.0.0.1:8000/static/app.css | grep -q -- "--accent"
+          curl -fsS "http://127.0.0.1:8000/folders/Disco%20Teste" -o folder.html
+          grep -q "Curadoria desligada" folder.html  # no token in CI
+          grep -q "Este produto usa a API do TMDB" folder.html
+          curl -fsS http://127.0.0.1:8000/static/tmdb.svg | grep -q "<svg"
           curl -fsS http://127.0.0.1:8000/health -o health.json
           cat health.json
           jq -e '.status == "ok" and ([.tools[]] | length == 7 and all(. != null))' health.json

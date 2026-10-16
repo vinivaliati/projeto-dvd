@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+from pydantic import SecretStr
 from pydantic_settings import BaseSettings
 
 
@@ -18,3 +19,6 @@ class Settings(BaseSettings):
     allowed_hosts: list[str] = ["localhost", "127.0.0.1"]
     # The output folder as the host sees it (HOST_OUTPUT_DIR), only to show the ISO path.
     host_output_dir: str | None = None
+    # TMDB API Read Access Token (Bearer); empty or missing turns the curation off. Phase 2.
+    tmdb_token: SecretStr | None = None
+    tmdb_language: str = "pt-BR"

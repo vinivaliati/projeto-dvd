@@ -12,6 +12,8 @@ url = context.config.get_main_option("sqlalchemy.url")
 if url is None:
     raise RuntimeError("sqlalchemy.url is not set; use projeto_dvd.db.session.migrate()")
 
+# No PRAGMA foreign_keys here: a batch migration copies and drops tables, and a cascade
+# would wipe the titles.
 engine = create_engine(url)
 with engine.connect() as connection:
     # Batch mode: SQLite cannot ALTER most things, so Alembic copies the table instead.
