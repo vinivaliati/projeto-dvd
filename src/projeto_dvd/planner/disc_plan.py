@@ -65,7 +65,9 @@ class TitlePlan(BaseModel):
     menu_name: str
 
 
-Action = Literal["play", "play_all", "page", "audio", "subtitle", "back"]
+Action = Literal[
+    "play", "play_all", "page", "audio", "subtitle", "audio_menu", "subtitle_menu", "back"
+]
 
 
 class MenuItem(BaseModel):
