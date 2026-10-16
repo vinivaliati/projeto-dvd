@@ -6,6 +6,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 FONT = Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf")
+FONT_BOLD = FONT.with_name("DejaVuSans-Bold.ttf")
 TIMING = re.compile(
     r"^\s*\d{1,2}:\d{2}:\d{2}[,.]\d{1,3}\s*-->\s*\d{1,2}:\d{2}:\d{2}[,.]\d{1,3}", re.MULTILINE
 )
