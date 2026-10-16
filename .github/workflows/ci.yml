@@ -56,8 +56,11 @@ jobs:
           sudo chown 1000:1000 /tmp/ci/work /tmp/ci/output
           printf 'HOST_MEDIA_DIR=/tmp/ci/media\nHOST_WORK_DIR=/tmp/ci/work\nHOST_OUTPUT_DIR=/tmp/ci/output\n' > .env
 
+      # --wait only on web: newer compose versions fail --wait on a service without healthcheck.
       - name: Build and start (waits for the healthcheck)
-        run: docker compose up -d --build --wait --wait-timeout 120
+        run: |
+          docker compose up -d --build worker
+          docker compose up -d --wait --wait-timeout 120 web
 
       - name: Smoke test
         run: |
