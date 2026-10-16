@@ -22,3 +22,22 @@ def dvd_language(tag: str | None) -> str | None:
     if head in ISO_639_1:
         return head
     return ISO_639_2.get(head)
+
+
+UNKNOWN_LANGUAGE = "Idioma não informado"
+# Portuguese names for the menus and the screens; other codes show in upper case.
+LANGUAGE_NAMES = {
+    "pt": "Português", "en": "Inglês", "es": "Espanhol", "fr": "Francês", "de": "Alemão",
+    "it": "Italiano", "ja": "Japonês", "ko": "Coreano", "zh": "Chinês", "ru": "Russo",
+    "nl": "Holandês", "sv": "Sueco", "no": "Norueguês", "da": "Dinamarquês", "fi": "Finlandês",
+    "pl": "Polonês", "tr": "Turco", "ar": "Árabe", "he": "Hebraico", "hi": "Hindi",
+    "th": "Tailandês", "cs": "Tcheco", "hu": "Húngaro", "el": "Grego", "ro": "Romeno",
+    "uk": "Ucraniano", "vi": "Vietnamita", "id": "Indonésio", "ca": "Catalão",
+}  # fmt: skip
+
+
+def language_name(code: str) -> str:
+    """'pt' as 'Português'; 'und' (no language) as 'Idioma não informado'."""
+    if code == "und":
+        return UNKNOWN_LANGUAGE
+    return LANGUAGE_NAMES.get(code, code.upper())
