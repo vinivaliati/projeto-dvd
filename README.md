@@ -11,10 +11,10 @@ The goal is a physical collection meant to last: discs that follow the official 
 BDMV specifications closely enough to play on an ordinary player 20 years from now, with menus
 simple enough for a child or a grandparent to use with just the remote.
 
-> **Status:** Phase 3 (minimal DVD). A disc folder with one video becomes a DVD-Video ISO
-> without menu, checked automatically before it reaches the output folder. The library reads
-> the technical data of each video with ffprobe. See the roadmap in [`CLAUDE.md`](CLAUDE.md)
-> (in Portuguese).
+> **Status:** Phase 2 (curation) on top of Phase 3 (minimal DVD). Each video of a disc folder
+> is matched with TMDB (movie or episode, pt-BR data and art), and a folder with one video
+> becomes a DVD-Video ISO without menu, checked automatically before it reaches the output
+> folder. See the roadmap in [`CLAUDE.md`](CLAUDE.md) (in Portuguese).
 
 ## Planned pipeline
 
@@ -54,6 +54,32 @@ entrada\                          (HOST_MEDIA_DIR, mounted read-only at /media)
   changes.
 - The input folder can be on `C:` or on the external drive itself. Copying to `C:` takes space
   (a Blu-ray movie is 30 to 50 GB).
+
+## Matching with TMDB
+
+The menus and covers of the next phases need to know which movie or episode each video is. The
+app finds it on [TMDB](https://www.themoviedb.org/) and the Vini confirms it.
+
+1. Create a free TMDB account, open Settings > API and copy the **API Read Access Token** (the
+   long one). Put it in `.env` as `TMDB_TOKEN=...` and run `docker compose up -d`. Without a
+   token the folder page explains this and everything else works.
+2. On a scanned folder, click **Buscar no TMDB**. Each video gets a card with a suggestion from
+   its file name (release names, `S01E03`, `1x03`, `T01E03`, `Temporada 2/03.mkv`, MakeMKV
+   `title_t00.mkv`...). A name that says nothing falls back to the folder name.
+3. A **Sugestão** is an exact title (and year) match; **Confira** marks what is ambiguous (two
+   movies with the same name, a 20-minute file suggested as a movie, an episode TMDB does not
+   have). **Confirmar todas as sugestões** confirms only the sure ones; **Corrigir** searches
+   by hand (movie or series, season and episode).
+4. Confirming saves the pt-BR data (English when there is no translation) and downloads the
+   default art: `HOST_OUTPUT_DIR\covers\<folder>\<Title (year)>\poster.jpg`, `backdrop.jpg`,
+   `logo.png` and `metadata.json` (episodes: `S01E03.jpg` and `S01E03.json` in the series
+   folder). Choosing among several images comes with the covers.
+
+The "Gerar DVD" form then suggests the audio in the original language from TMDB.
+
+<img src="src/projeto_dvd/web/static/tmdb.svg" alt="TMDB" height="14">
+This product uses the TMDB API but is not endorsed or certified by TMDB. The data and images
+are used for personal, non-commercial purposes (printing covers of one's own collection).
 
 ## Generating a DVD
 
@@ -95,6 +121,7 @@ temporários** on the job page removes what is left.
 ## Stack
 
 - Python 3.12, FastAPI, Jinja2, HTMX and a small hand-written CSS (no build step)
+- httpx2 for the TMDB API (and its `MockTransport` in the tests: they never call TMDB)
 - SQLite (WAL) with SQLModel and Alembic; a separate worker process runs the jobs
 - Media toolchain: ffmpeg, dvdauthor/spumux, genisoimage, tsMuxeR, xorriso
 - Docker and docker compose; GitHub Actions CI
@@ -171,6 +198,10 @@ MEDIA_DIR=/path/to/entrada DATABASE_URL=sqlite:///./projeto_dvd.db \
 - HTMX 2.0.11 is vendored at `src/projeto_dvd/web/static/htmx.min.js` (source
   `https://unpkg.com/htmx.org@2.0.11/dist/htmx.min.js`, sha256
   `d6fdc75f204e6bdefa99b69bf1e6d4ac69b8a364f77929f45c13476b4000f717`).
+
+- The TMDB logo in the footer is `src/projeto_dvd/web/static/tmdb.svg`, their "blue short"
+  logo from https://www.themoviedb.org/about/logos-attribution (sha256
+  `8e7b30f73a4020692ccca9c88bafe5dcb6f8a62a4c6bc55cd9ba82bb2cd95f6c`).
 
 ## License
 

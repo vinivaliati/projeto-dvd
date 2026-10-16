@@ -16,7 +16,8 @@ as artes de melhor qualidade disponíveis.
 - **Parser de nomes:** reconhecer padrões comuns (`S01E03`, `1x03`, `Titulo (1999)`, ruído de
   release como `1080p`, `BluRay`, `x264`). Cada padrão novo entra com um caso de teste.
 - **TMDB:** idioma `pt-BR` com fallback para `en`. Usar a "collection" do TMDB quando existir. Cache
-  local das respostas. Nos testes, sempre mockar com `respx`, nunca chamar a API real.
+  local das respostas. Nos testes, sempre mockar com `httpx2.MockTransport`
+  (o cliente é o `httpx2`), nunca chamar a API real.
 - **Matching:** em caso de dúvida (vários candidatos com pontuação parecida), não escolher sozinho:
   marcar para o Vini confirmar.
 - **Artes:** preferir maior resolução; pôster no idioma pt-BR quando existir; fundos (backdrops)

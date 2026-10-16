@@ -11,9 +11,10 @@ O objetivo é uma coleção física feita para durar: discos que seguem as espec
 de DVD-Video e BDMV à risca, para tocar num player comum daqui a 20 anos, com menus simples o
 bastante para uma criança ou um avô usarem só com o controle remoto.
 
-> **Status:** Fase 3 (DVD mínimo). Uma pasta de disco com um vídeo vira um ISO de DVD-Video
-> sem menu, conferido automaticamente antes de chegar à pasta de saída. A biblioteca lê os
-> dados técnicos de cada vídeo com o ffprobe. O roadmap está no [`CLAUDE.md`](CLAUDE.md).
+> **Status:** Fase 2 (curadoria) em cima da Fase 3 (DVD mínimo). Cada vídeo de uma pasta de
+> disco ganha o match no TMDB (filme ou episódio, dados em pt-BR e artes), e uma pasta com um
+> vídeo vira um ISO de DVD-Video sem menu, conferido automaticamente antes de chegar à pasta de
+> saída. O roadmap está no [`CLAUDE.md`](CLAUDE.md).
 
 ## Pipeline planejado
 
@@ -53,6 +54,34 @@ entrada\                          (HOST_MEDIA_DIR, montada em /media, somente le
   mudam.
 - A pasta de entrada pode ficar no `C:` ou no próprio HD externo. Copiar para o `C:` ocupa
   espaço (um filme em Blu-ray tem de 30 a 50 GB).
+
+## Match no TMDB
+
+Os menus e as capas das próximas fases precisam saber qual filme ou episódio é cada vídeo. O
+app procura no [TMDB](https://www.themoviedb.org/) e o Vini confirma.
+
+1. Crie uma conta grátis no TMDB, abra Configurações > API e copie o **Token de leitura da API**
+   (o longo). Coloque no `.env` como `TMDB_TOKEN=...` e rode `docker compose up -d`. Sem o token,
+   a tela da pasta explica isso e todo o resto funciona.
+2. Numa pasta escaneada, clique em **Buscar no TMDB**. Cada vídeo ganha um cartão com uma
+   sugestão tirada do nome do arquivo (nomes de release, `S01E03`, `1x03`, `T01E03`,
+   `Temporada 2/03.mkv`, `title_t00.mkv` do MakeMKV...). Um nome que não diz nada usa o nome da
+   pasta.
+3. **Sugestão** é um título (e ano) que bate exatamente; **Confira** marca o que é ambíguo (dois
+   filmes com o mesmo nome, um arquivo de 20 minutos sugerido como filme, um episódio que o TMDB
+   não tem). **Confirmar todas as sugestões** confirma só as seguras; **Corrigir** busca à mão
+   (filme ou série, temporada e episódio).
+4. Confirmar salva os dados em pt-BR (em inglês quando não há tradução) e baixa as artes padrão:
+   `HOST_OUTPUT_DIR\covers\<pasta>\<Título (ano)>\poster.jpg`, `backdrop.jpg`, `logo.png` e
+   `metadata.json` (episódios: `S01E03.jpg` e `S01E03.json` na pasta da série). A escolha entre
+   várias imagens chega com as capas.
+
+O formulário "Gerar DVD" passa a sugerir o áudio no idioma original informado pelo TMDB.
+
+<img src="src/projeto_dvd/web/static/tmdb.svg" alt="TMDB" height="14">
+Este produto usa a API do TMDB, mas não é endossado nem certificado pelo TMDB ("This product
+uses the TMDB API but is not endorsed or certified by TMDB."). Os dados e as imagens são usados
+para fins pessoais e não comerciais (imprimir as capas da própria coleção).
 
 ## Gerando um DVD
 
@@ -94,6 +123,7 @@ arquivos temporários**, na tela do job, remove o que sobrar.
 ## Stack
 
 - Python 3.12, FastAPI, Jinja2, HTMX e um CSS próprio pequeno (sem etapa de build)
+- httpx2 para a API do TMDB (e o `MockTransport` dele nos testes: eles nunca chamam o TMDB)
 - SQLite (WAL) com SQLModel e Alembic; um processo worker separado roda os jobs
 - Ferramentas de mídia: ffmpeg, dvdauthor/spumux, genisoimage, tsMuxeR, xorriso
 - Docker e docker compose; CI no GitHub Actions
@@ -171,6 +201,10 @@ MEDIA_DIR=/caminho/para/entrada DATABASE_URL=sqlite:///./projeto_dvd.db \
 - O HTMX 2.0.11 fica versionado em `src/projeto_dvd/web/static/htmx.min.js` (origem
   `https://unpkg.com/htmx.org@2.0.11/dist/htmx.min.js`, sha256
   `d6fdc75f204e6bdefa99b69bf1e6d4ac69b8a364f77929f45c13476b4000f717`).
+
+- O logo do TMDB no rodapé é o `src/projeto_dvd/web/static/tmdb.svg`, o logo "blue short" de
+  https://www.themoviedb.org/about/logos-attribution (sha256
+  `8e7b30f73a4020692ccca9c88bafe5dcb6f8a62a4c6bc55cd9ba82bb2cd95f6c`).
 
 ## Licença
 
