@@ -152,7 +152,8 @@ Uma tarefa só está pronta quando:
 ### 3.5 Geração do disco
 - Fila de jobs: encode → render do menu → authoring → `.iso`.
 - Progresso em tempo real (lido da saída do ffmpeg), tempo estimado, log completo de cada etapa.
-- Retomar ou cancelar job. Se um título já foi codificado com os mesmos parâmetros, reaproveitar.
+- Cancelar job (Fase 3). Retomar job e reaproveitar um título já codificado com os mesmos
+  parâmetros ficam para a Fase 4.
 - Antes de começar, checar o espaço livre na pasta de trabalho (um BD-50 pode precisar de >100 GB
   de intermediários).
 - Limpar os intermediários ao final, **com confirmação**.
@@ -181,10 +182,16 @@ Cada perfil é um objeto de configuração (não código espalhado): capacidade 
 limites de bitrate, faixas de qualidade (verde/amarelo/vermelho), formato de legenda e ferramenta
 de authoring. Adicionar um perfil novo tem que ser só adicionar uma entrada.
 
-**Calculadora:**
-`bitrate_vídeo = (capacidade_útil - soma_áudio - soma_legendas - menus - overhead) / duração_total`,
-com capacidade útil de cerca de 95% da nominal. As faixas de qualidade iniciais (calibrar com
-testes reais):
+**Calculadora** (`planner/calculator.py`, DVD na Fase 3):
+- capacidade pelo **menor** valor entre −R e +R, em setores de 2048 bytes: DVD-5 2.295.104,
+  DVD-9 4.171.712 (a mídia ainda não foi comprada);
+- `capacidade_útil = 97% dos bytes − 4 MiB` (IFO, BUP e sistema de arquivos);
+- `bitrate_vídeo = capacidade_útil × 8 / 1,03 / duração − Σáudio − 10 kbps × legendas`
+  (3% de overhead de mux medido), limitado a 95% do `maxrate = min(9000, 10080 − Σáudio − 40 ×
+  legendas − 300)` kbps (alvo igual ao maxrate transformaria o 2 passes em CBR);
+- abaixo de 1 Mbps o perfil "não cabe".
+As faixas de qualidade (palavras na tela: Ótima, Aceitável, Baixa, Não cabe), a calibrar com
+testes reais:
 - DVD: verde ≥ 5 Mbps, amarelo entre 3,5 e 5, vermelho < 3,5.
 - Blu-ray: verde ≥ 15 Mbps, amarelo entre 8 e 15, vermelho < 8.
 
@@ -202,13 +209,18 @@ validado com teste antes de virar padrão.
 ### 5.1 DVD-Video
 - Vídeo: MPEG-2, 720x480 NTSC (padrão dos DVDs brasileiros, região 4), PAL 720x576 opcional.
 - Aspecto: 16:9 anamórfico (flag correta) ou 4:3, conforme a origem.
-- Bitrate: vídeo ≤ 9,8 Mbps, mux total ≤ 10,08 Mbps. Usar **encode em 2 passes** (VBR) para
-  aproveitar a capacidade.
-- Fontes em 23,976 fps: usar **soft pulldown** (flags de repetição) em vez de converter para
-  29,97 de verdade. A confirmar como fazer isso de forma confiável com ffmpeg.
-- Áudio: AC-3 48 kHz, até 448 kbps (5.1) ou 192 kbps (estéreo). Se a origem já for AC-3
-  compatível, copiar sem recodificar. Até 8 faixas de áudio por título.
-- Legendas: bitmap (subpicture). Converter SRT para subpicture com `spumux`. Até 32 faixas.
+- Bitrate: vídeo ≤ 9,0 Mbps no app (o padrão permite 9,8; a folga cobre o pico do VBV dentro do
+  mux de 10,08 Mbps). **Encode em 2 passes** pelo ffmpeg com os parâmetros de
+  `encode/video.py` (GOP fechado de 12, VBV 1835k, cor BT.601 com tags via `mpeg2_metadata`,
+  `-r` sempre explícito). **Proibido `-target ntsc-dvd`**: duplica quadros (tranco).
+- Fontes em 23,976 fps: **soft pulldown** por um patcher próprio no estilo DGPulldown
+  (`encode/mpeg2.py`, edita o `.m2v` no lugar). Fontes 480i ficam entrelaçadas; rips de DVD são
+  classificados pelos quadros (filme, entrelaçado ou híbrido, este com hard telecine).
+- Áudio: só AC-3 48 kHz. Copiar se a origem já for AC-3 de até 448 kbps e 6 canais; senão
+  converter mantendo o layout (448k de 3 a 6 canais, 192k estéreo, 96k mono). DTS é opcional na
+  especificação do DVD e LPCM gasta bitrate demais. Até 8 faixas de áudio por título.
+- Legendas: bitmap (subpicture). SRT e texto do MKV viram subpicture com `spumux` (DejaVu Sans
+  26, contorno, margens de ~10%). PGS, VobSub e ASS ainda não. Até 32 faixas.
 - Limites da estrutura: até 99 títulos e 99 capítulos por título.
 - Menus: 720x480; respeitar a **área segura** (~10% de margem) porque TVs cortam as bordas;
   o destaque dos botões é um subpicture com **paleta de no máximo 4 cores** (restrição real para o
@@ -256,7 +268,7 @@ validado com teste antes de virar padrão.
 | Banco | **SQLite** com **SQLModel**; migrações com **Alembic** |
 | Frontend | **Jinja2 + HTMX + CSS próprio** (sem build; reavaliar no editor de menus, Fase 4) |
 | Jobs | tabela `jobs` no SQLite + processo worker separado. Sem Celery/Redis a menos que fique necessário |
-| Mídia | `ffmpeg`/`ffprobe`, `dvdauthor`, `spumux`, `tsMuxeR`, `xorriso` (`genisoimage` entra na Fase 3) |
+| Mídia | `ffmpeg`/`ffprobe`, `dvdauthor`, `spumux`, `genisoimage`, `tsMuxeR`, `xorriso` |
 | Imagens e PDF | **Pillow** para menus e artes; **reportlab** para o PDF de impressão |
 | Metadados | **TMDB API** via `httpx`, com cache local das respostas |
 | Infra | **Docker** + **docker-compose**; CI no **GitHub Actions** |
@@ -275,11 +287,12 @@ Variáveis do **app** (caminhos dentro do container), entram quando forem usadas
 ```
 MEDIA_DIR=/media                # Fase 1; a pasta de entrada (uma só)
 DATABASE_URL=sqlite:////data/projeto_dvd.db   # Fase 1; volume data
-WORK_DIR=/work                  # Fase 3
-OUTPUT_DIR=/output              # Fase 3
+WORK_DIR=/work                  # Fase 3; intermediários e logs dos jobs
+OUTPUT_DIR=/output              # Fase 3; ISOs em OUTPUT_DIR/iso
+ALLOWED_HOSTS=["localhost","127.0.0.1"]   # Fase 3; hosts aceitos (TrustedHost)
+HOST_OUTPUT_DIR=                # Fase 3; o compose repassa ao web só para mostrar o caminho do ISO no Windows
 TMDB_API_KEY=                   # Fase 2
 TMDB_LANGUAGE=pt-BR             # Fase 2
-DEFAULT_DVD_STANDARD=NTSC       # Fase 3
 ```
 
 ### 6.2 Docker
@@ -287,9 +300,11 @@ DEFAULT_DVD_STANDARD=NTSC       # Fase 3
   tsMuxeR e uv por checksum/digest. Usuário não root `app` (UID 1000).
 - Estágios `runtime` (a imagem do app, também o padrão de um `docker build .`) e `test` (runtime
   + dependências de dev + `tests/`, para os testes `slow` com as ferramentas reais, sem rede).
-- `docker-compose.yml` com o serviço `web` (porta só em `127.0.0.1:8000`, `target: runtime`), os
-  volumes acima e o volume nomeado `data` (banco SQLite; `docker compose down -v` apaga). O
-  serviço `worker` entra na Fase 3 (considerar `init: true` para recolher processos do ffmpeg).
+- `docker-compose.yml` com o serviço `web` (porta só em `127.0.0.1:8000`, `target: runtime`), o
+  serviço `worker` (mesma imagem, `python -m projeto_dvd.jobs.worker`, `init: true`,
+  `stop_grace_period: 30s`, sem porta), os volumes acima e o volume nomeado `data` (banco
+  SQLite em WAL; `docker compose down -v` apaga). O Alembic roda só no `web`; o worker espera a
+  migração.
 - `make dev`, `make test`, `make test-slow`, `make lint`, `make format` e `make fixtures`
   documentados no README.
 
@@ -299,18 +314,18 @@ DEFAULT_DVD_STANDARD=NTSC       # Fase 3
 
 ```
 src/projeto_dvd/
-  api/            # rotas FastAPI (JSON + fragments HTMX)
+  api/            # rotas FastAPI (fragments HTMX), deps compartilhadas, mesma origem
   web/            # templates Jinja, estáticos
   library/        # scan, ffprobe, detecção de legendas externas
   metadata/       # cliente TMDB, parser de nome de arquivo, matching, download de artes
-  planner/        # perfis de disco, calculadora, montador, divisor de série
-  encode/         # construtores de comando ffmpeg por perfil (funções puras)
+  planner/        # perfis, calculadora, fontes suportadas, plano do disco (dvd_plan), divisor de série
+  encode/         # comandos ffmpeg por perfil (funções puras); mpeg2.py: soft pulldown e leitura
   authoring/
-    dvd/          # dvdauthor XML, spumux
+    dvd/          # mux, dvdauthor XML, spumux, QA automática do ISO
     bluray/       # tsMuxeR meta, (menus após o spike)
   menus/          # temas, layout, render de fundo e botões
   covers/         # layout de capa, lombada, verso, label, PDF
-  jobs/           # fila, worker, progresso
+  jobs/           # runner de processos, pipeline, fila (store), worker, arquivos do job
   db/             # modelos SQLModel, sessão, migrações
   app.py          # fábrica create_app (uvicorn --factory)
   config.py       # settings via pydantic-settings
@@ -338,7 +353,9 @@ Em paralelo: `artes → composição da capa → PDF`.
 - `Collection`: agrupamento (franquia ou temporada), com tema visual.
 - `DiscProject`: um disco; **perfil escolhido**, títulos em ordem, faixas selecionadas, capítulos, tema do menu, status.
 - `DiscSet`: box com vários `DiscProject` (cada um com o próprio perfil).
-- `Job`: etapa da geração; tipo, status, progresso, log, parâmetros (hash para reaproveitar encode).
+- `Job` (tabela `job`, Fase 3): uma geração de disco; o `DvdPlan` inteiro em `plan_json` (no
+  lugar de um `DiscProject` por enquanto), status, etapa, progresso, erro, QA e caminho do ISO;
+  log em `WORK_DIR/jobs/<id>/job.log`. Hash para reaproveitar encode fica para a Fase 4.
 - `ArtAsset`: arte baixada; tipo (poster, backdrop, logo, still), caminho, origem, idioma.
 - `CoverLayout`: escolhas de arte e texto de uma capa, e o PDF gerado.
 
@@ -352,7 +369,9 @@ Em paralelo: `artes → composição da capa → PDF`.
 5. **Box**: discos do conjunto, perfil de cada um, numeração.
 6. **Menu**: tema e preview.
 7. **Capa**: escolha das artes, preview, gerar PDF.
-8. **Jobs**: fila, progresso, logs, cancelar/retomar.
+8. **Jobs** (Fase 3): lista e tela do job (etapas, progresso, tempo restante, log, cancelar,
+   apagar temporários, resultado da QA). Na Fase 3 o "montador" é o formulário "Gerar DVD" de
+   uma pasta com um vídeo; retomar fica para a Fase 4.
 9. **Configurações**: pastas, chave TMDB, padrões (NTSC/PAL, idioma).
 
 ---
@@ -381,11 +400,14 @@ CLAUDE.md, inclusive a regra do travessão.
   disco de verdade e validar a estrutura. Marcar como `@pytest.mark.slow` e rodar no CI.
 - **TMDB**: mockar com `respx`; nunca chamar a API real nos testes.
 - **Checklist de QA do ISO** (agente `qa`), antes de gravar qualquer disco:
-  1. tamanho do ISO ≤ capacidade útil do perfil;
+  1. tamanho do ISO ≤ capacidade física da mídia (reprova); acima da capacidade útil de 97%
+     só avisa;
   2. estrutura válida (VIDEO_TS com IFO/BUP/VOB ou BDMV/CERTIFICATE);
   3. `ffprobe` nos streams: codec, resolução, aspecto, faixas e idiomas corretos;
-  4. abre no VLC pelo menu, cada botão leva ao título certo, "menu" volta;
-  5. áudio e legendas trocam pelo menu;
+  4. abre no VLC pelo menu, cada botão leva ao título certo, "menu" volta (disco sem menu, Fase
+     3: o filme começa sozinho, "Menu" e "Title" não travam, no fim o disco para);
+  5. áudio e legendas trocam pelo menu (sem menu: pelo VLC/controle; a faixa e a legenda do
+     início são as escolhidas);
   6. primeiro disco de cada perfil: testar num **player físico** antes de gravar em lote
      (preferir mídia regravável para os testes).
 
@@ -433,11 +455,13 @@ não mudam; a Fase 3 vem antes da 2 para ter um disco de verdade o quanto antes.
 - [x] **Fase 1: Biblioteca.** Pasta de entrada com uma subpasta por disco, scan, ffprobe,
       catálogo, tela de biblioteca e tela da pasta.
 - [ ] **Fase 3: DVD mínimo.** 1 filme → ISO sem menu, com perfil DVD-5/DVD-9 escolhido, que passa
-      no checklist. Pronto em duas etapas: agora, ISO validado no VLC; depois, o teste num player
-      físico, quando o gravador for comprado.
+      no checklist. Inclui a calculadora de um título, a escolha de faixas e os jobs com
+      progresso (worker). Pronto em duas etapas: agora, ISO validado no VLC; depois, o teste num
+      player físico, quando o gravador for comprado.
 - [ ] **Fase 2: Curadoria.** Parser de nomes, TMDB, correção manual, coleções, download de artes.
-- [ ] **Fase 4: Montador + menus DVD.** Vários títulos, episódios, calculadora com seletor de perfil,
-      menus com tema, áudio/legenda, jobs com progresso.
+- [ ] **Fase 4: Montador + menus DVD.** Vários títulos, episódios, menus com tema, submenus de
+      áudio/legenda, retomar job e reaproveitar encode, copiar o vídeo de rip de DVD sem
+      recodificar.
 - [ ] **Fase 5: Capas.** Composição frente/lombada/verso, label, PDF.
 - [ ] **Fase 6: Blu-ray.** BDMV sem menu com perfil BD-25/BD-50 + spike de menus e decisão.
 - [ ] **Fase 7: Boxes.** Conjuntos de discos com perfis independentes, tema unificado, lombadas
@@ -452,14 +476,15 @@ não mudam; a Fase 3 vem antes da 2 para ter um disco de verdade o quanto antes.
   DVD também. Para durabilidade, avaliar mídia **M-DISC** (existe em DVD e BD). A segunda etapa
   do pronto da Fase 3 (teste num player físico) depende dessa compra.
 - **Menus de Blu-ray:** resolver no spike da Fase 6.
-- **Soft pulldown no DVD** para fontes 23,976 fps: o ffmpeg não grava as flags RFF de forma
-  confiável. Candidato para a Fase 3: `mpeg2enc` (pacote `mjpegtools`) ou pós-processamento.
-- **Checagem de escrita em `/work`, `/output` e `/data`** no app (Fase 3): o Docker Desktop ignora
-  `create_host_path: false`, então uma pasta que falte vira root e o erro só aparece ao gravar. O
-  volume `data` mantém o dono antigo se já existia ou se o `UID` da imagem mudar.
-- **Campos de mídia da Fase 3 no resumo do ffprobe** (`field_order`, `pix_fmt`, `sample_rate`,
-  `color_primaries`): precisam entrar no `Summary` para que os testes `slow` comparem as fixtures
-  também nesses campos.
+- **Soft pulldown no DVD:** resolvido no VLC e no ffprobe (patcher próprio, Fase 3). Falta
+  confirmar no **player físico**: o `time_code` do GOP na escala de 24p, o `subtitle=64` que liga
+  a legenda e a suavidade do pulldown.
+- **Volume `data`:** a checagem de escrita da Fase 3 cobre `/work` e `/output` (o formulário
+  explica o `chown`); o `/data` falha de forma explícita na migração do startup. O volume mantém
+  o dono antigo se já existia ou se o `UID` da imagem mudar.
+- **Copiar o vídeo de um rip de DVD sem recodificar** (evita perder uma geração): Fase 4 ou antes.
+- **HDR/4K, PGS, VobSub, PAL:** fora da Fase 3; a receita de tonemap do `tech-lead-midia` está na
+  spec da Fase 3.
 - **Medidas exatas das capas e do label:** confirmar com o material comprado.
 - **NTSC vs PAL:** padrão NTSC; confirmar com o player que vai ser usado.
 
@@ -483,6 +508,16 @@ _Atualizar ao fim de cada sessão._
   ok do Vini. `make lint`, `make test` (216 testes, 100% de cobertura) e `make test-slow` (7)
   verdes. PR #3 mergeado em `main` com CI verde (`quality` e `docker`). Fase 1 concluída.
   **Próximo passo:** Fase 3 (DVD mínimo), começando por `/superpowers:brainstorm`.
+- 2026-10-16: **Fase 3 implementada** na branch `feat/fase-3-dvd-minimo` (spec e plano em
+  `docs/plans/2026-10-15-fase-3-dvd-minimo*.md`, ledger em `.superpowers/sdd/`). Uma pasta com
+  um vídeo vira um ISO de DVD-Video sem menu (DVD-5 ou DVD-9), gerado pelo serviço `worker` com
+  progresso, cancelamento e QA automática; formulário "Gerar DVD" com sugestões, tela do job e
+  lista de jobs. 17 tasks, cada uma revisada pelos agentes. `make lint` e `make test` (560
+  testes, 100% de cobertura) verdes; smoke de ponta a ponta no CI. Falta: `make test-slow`
+  final, PR e a **QA manual com um filme real no VLC** (primeira etapa do pronto); depois, o
+  teste no player físico quando o gravador for comprado.
+  Pequenos adiados: idiomas mostrados como código ("eng") em vez do nome; o botão "Escanear"
+  continua primário depois de um scan na mesma página.
 - Os agentes de `.claude/agents/` só são reconhecidos pelo nome a partir de uma sessão nova; na
   sessão em que foram criados, rodam como agente genérico lendo o próprio arquivo.
 
@@ -550,3 +585,32 @@ _Atualizar ao fim de cada sessão._
 - 2026-10-15: roadmap reordenado para 1 → 3 → 2 → 4 → 5 → 6 → 7 → 8 (números mantidos), para ter
   um disco de verdade antes da curadoria. A Fase 3 fica pronta em duas etapas: ISO validado no VLC
   agora; teste num player físico quando o gravador for comprado (ver 13).
+- 2026-10-16 (Fase 3): MPEG-2 pelo ffmpeg em 2 passes com os parâmetros de `encode/video.py`;
+  proibido `-target ntsc-dvd`; `-r` sempre explícito. Alvo de vídeo limitado a 95% do maxrate
+  (alvo igual ao maxrate virava CBR e o ffmpeg avisava "impossible bitrate constraints").
+- 2026-10-16 (Fase 3): soft pulldown por patcher próprio (estilo DGPulldown, `mmap` no lugar, um
+  leitor MPEG-2 só para o patcher e a QA); `mpeg2enc` descartado (lento, sem alvo de tamanho).
+- 2026-10-16 (Fase 3): rip de DVD classificado pelos quadros (filme, entrelaçado, híbrido com hard
+  telecine); 480i codificado entrelaçado. Cor: escala com lanczos e `colorspace` para BT.601 só
+  em origem HD, tags via `mpeg2_metadata`.
+- 2026-10-16 (Fase 3): áudio só AC-3: copiar se ≤ 448k, 48 kHz e ≤ 6 canais; senão converter
+  mantendo o layout. `-itsoffset` no mux corrige o atraso do m2v e preserva o da origem.
+  `audio=0` sempre e `subtitle=64/0` no `<pre>` do título.
+- 2026-10-16 (Fase 3): mux com `ffmpeg -f dvd -fflags +genpts`; ISO com `genisoimage -dvd-video
+  -udf`. Capacidade pelo menor valor entre −R e +R, em setores, com margem de 97% menos 4 MiB; a
+  QA reprova acima do limite físico e avisa acima da margem.
+- 2026-10-16 (Fase 3): legendas SRT e texto do MKV via `spumux`; PGS, VobSub, ASS, HDR, PAL e 4K
+  adiados.
+- 2026-10-16 (Fase 3): worker em processo separado, SQLite em WAL, transições atômicas, índice
+  único por pasta ativa, um job por vez. Intermediários apagados ao longo do pipeline (pico de ~2
+  vezes o disco); o ISO só vai para `/output` depois de passar na QA, numa etapa própria "Copiando
+  o ISO" (copiar 8 GB para o `/mnt/c` leva minutos e precisa de progresso e cancelamento).
+- 2026-10-16 (Fase 3): `TrustedHostMiddleware` e checagem de mesma origem (`Sec-Fetch-Site`) em
+  todo método não seguro. Formulário lido com `parse_qs` (sem `python-multipart`).
+- 2026-10-16 (Fase 3): tolerâncias da QA automática: até max(2, quadros/1000) quadros duplicados
+  ou perdidos (o `-fps_mode cfr` duplica o último quadro por arredondamento; tranco real é 1 a
+  cada 5); 0 capítulos no ffprobe aceito quando o plano tem um só; avisos do próprio muxer `null`
+  ignorados na decodificação completa.
+- 2026-10-16 (Fase 3): tela do job com tempos relativos ("há 12 min"): o container é UTC sem
+  `tzdata`. Tempo de encode estimado pela duração (×0,2 em HD, ×0,1 em SD), a calibrar com um
+  filme real.

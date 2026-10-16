@@ -11,9 +11,9 @@ The goal is a physical collection meant to last: discs that follow the official 
 BDMV specifications closely enough to play on an ordinary player 20 years from now, with menus
 simple enough for a child or a grandparent to use with just the remote.
 
-> **Status:** Phase 1 (library). The app lists each disc folder of the input folder and reads
-> the technical data of its videos with ffprobe: duration, resolution, codecs, HDR, audio and
-> subtitle tracks, chapters and external subtitles. See the roadmap in [`CLAUDE.md`](CLAUDE.md)
+> **Status:** Phase 3 (minimal DVD). A disc folder with one video becomes a DVD-Video ISO
+> without menu, checked automatically before it reaches the output folder. The library reads
+> the technical data of each video with ffprobe. See the roadmap in [`CLAUDE.md`](CLAUDE.md)
 > (in Portuguese).
 
 ## Planned pipeline
@@ -55,11 +55,48 @@ entrada\                          (HOST_MEDIA_DIR, mounted read-only at /media)
 - The input folder can be on `C:` or on the external drive itself. Copying to `C:` takes space
   (a Blu-ray movie is 30 to 50 GB).
 
+## Generating a DVD
+
+1. Put one video in a disc folder, open the folder in the app and click **Escanear**.
+2. Click **Gerar DVD**. The form already suggests everything; change what you want:
+   - **Audio:** the Portuguese and original-language tracks are selected; pick the one that
+     plays when the disc starts. Compatible AC-3 is copied without loss; anything else (DTS,
+     TrueHD, AAC...) becomes AC-3, never inventing channels.
+   - **Subtitles:** text subtitles (an `.srt` next to the video, or a text track inside the
+     MKV) are drawn as DVD subtitles; choose one to start turned on, or none.
+   - **Chapters:** from the file, or every N minutes (99 at most).
+   - **Disc:** DVD-5 (single layer, 4.7 GB) or DVD-9 (dual layer, 8.5 GB), each card showing the
+     size and the picture quality: "Ótima" (5 Mbps or more), "Aceitável" (3.5 to 5), "Baixa"
+     (below 3.5, needs a confirmation) or "Não cabe".
+3. The job page shows each step, the progress and the time left; you can close it and come
+   back from **Jobs**. A 2-hour 1080p movie takes 20 to 30 minutes on a 6-core CPU.
+4. The ISO is checked automatically (size, VIDEO_TS structure, streams and languages, chapters,
+   field order, audio sync, a full decode). Only an approved ISO is copied to
+   `HOST_OUTPUT_DIR\iso\<folder>.iso` (the job page shows the full Windows path); a rejected
+   one stays in the work folder with the reason.
+5. Test the ISO in VLC (Media, Open Disc) with the checklist on the job page, then burn it on
+   Windows with ImgBurn ("Write image file to disc", low speed, verify).
+
+How it works, briefly: MPEG-2 in two passes (never `-target ntsc-dvd`, which duplicates
+frames); 23.976 fps films get **soft pulldown** by a small in-place patcher (the player shows
+29.97 without judder); 480i sources stay interlaced; DVD rips are classified by their frames;
+`dvdauthor` makes a title that starts on its own and `genisoimage -dvd-video -udf` makes the
+ISO.
+
+**Not supported yet** (the screen explains why): HDR and 4K, PAL/25 fps, exact 24 fps, 29.97
+progressive, 59.94, variable frame rate, 1080i, image subtitles (PGS, VobSub) and ASS styling,
+menus and several titles per disc. For a movie whose Portuguese subtitle is an image, put an
+`.srt` next to it.
+
+The work folder needs about **twice the disc size** free (about 18 GB for a DVD-9): each
+intermediate file is deleted as soon as the next step succeeds, and **Apagar arquivos
+temporários** on the job page removes what is left.
+
 ## Stack
 
 - Python 3.12, FastAPI, Jinja2, HTMX and a small hand-written CSS (no build step)
-- SQLite with SQLModel and Alembic
-- Media toolchain: ffmpeg, dvdauthor/spumux, tsMuxeR, xorriso
+- SQLite (WAL) with SQLModel and Alembic; a separate worker process runs the jobs
+- Media toolchain: ffmpeg, dvdauthor/spumux, genisoimage, tsMuxeR, xorriso
 - Docker and docker compose; GitHub Actions CI
 - uv, ruff, mypy (strict), pytest
 
@@ -83,6 +120,11 @@ in the container and returns 503 if any of them is missing.
 
 The input folder is mounted **read-only**: the app never modifies the original files.
 
+Two services run: `web` (the pages) and `worker` (one DVD job at a time). `docker compose logs
+worker` shows what the worker is doing; `docker compose stop` stops the running encode within a
+few seconds and marks the job as failed (generate it again). The app answers only on
+`localhost`/`127.0.0.1` and refuses state-changing requests sent by other sites.
+
 The scan results are kept in a SQLite database in the `data` Docker volume, so they survive
 rebuilds. `docker compose down -v` erases that volume (the scan cache only, never the media);
 the next scan reads everything again.
@@ -100,6 +142,12 @@ Requirements: [uv](https://docs.astral.sh/uv/).
 | `make fixtures` | Regenerate the ffprobe JSON fixtures with the ffmpeg pinned in the image |
 | `make dev` | Build and start the app with docker compose |
 
+To generate a disc from the terminal with the suggested choices (development and debugging):
+
+```bash
+docker compose run --rm worker python -m projeto_dvd.jobs.pipeline "Folder name"
+```
+
 To run the app without Docker (needs `ffprobe` on the `PATH` to scan):
 
 ```bash
@@ -114,6 +162,9 @@ MEDIA_DIR=/path/to/entrada DATABASE_URL=sqlite:///./projeto_dvd.db \
   `Dockerfile` and commit. After an ffmpeg update, run `make test-slow`: it compares the
   committed fixtures with the new ffprobe output. The Dolby Vision profile 5 fixture is
   hand-written: also check that ffprobe still names its side data "DOVI configuration record".
+- The DVD subtitles use the DejaVu Sans font of the image (`fonts-dejavu-core`, pinned). The
+  soft pulldown patcher leaves the GOP `time_code` on a 24p scale; players ignore it, but
+  confirm on the first physical player test.
 - tsMuxeR has low upstream activity. Keep a copy of
   `tsMuxer-2.7.0-linux.zip` (sha256 `ceaaa181ab70e201685b1e45260d337d1cbdb0aba1408d4fbc47e232a7e4c987`)
   outside GitHub.
