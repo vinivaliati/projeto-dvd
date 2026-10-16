@@ -106,6 +106,20 @@ def test_without_portuguese_suggests_only_the_original() -> None:
     assert (choices.audio, choices.first_audio) == ((1,), 1)
 
 
+def test_original_language_from_tmdb_when_the_track_exists() -> None:
+    summary = make(audio(1, "eng"), audio(2, "jpn", channels=2), audio(3, "por"))
+
+    choices = suggest_choices(summary, subtitle_options(summary, ()), 7200.0, "ja")
+
+    assert choices.audio == (2, 3)
+
+
+def test_original_language_from_tmdb_without_that_track_is_ignored() -> None:
+    summary = make(audio(1, "eng"), audio(2, "jpn", channels=2))
+
+    assert suggest_choices(summary, subtitle_options(summary, ()), 7200.0, "cn").audio == (1,)
+
+
 def test_unknown_language_suggests_the_first_track() -> None:
     summary = make(audio(1, None), audio(2, None))
 

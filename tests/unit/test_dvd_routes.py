@@ -7,15 +7,18 @@ from urllib.parse import quote
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from projeto_dvd.api import dvd, library
 from projeto_dvd.app import create_app
 from projeto_dvd.config import Settings
+from projeto_dvd.db.models import MediaFile, Title
 from projeto_dvd.jobs import pipeline, store
 from projeto_dvd.library.probe import ProbeResult
+from projeto_dvd.metadata.tmdb_models import DETAILS, Movie, MovieDetails
 from projeto_dvd.planner.dvd_plan import DvdPlan
 from tests.client import client_for
+from tests.tmdb_fakes import MOVIE as TMDB_MOVIE
 from tests.tree import make_file
 
 SAME = {"Sec-Fetch-Site": "same-origin"}
@@ -352,3 +355,33 @@ def test_converted_ac3_explains_why(client: TestClient, probe_data: dict[str, ob
 
     assert "porque o original não segue o padrão do DVD" in page
     assert "A geração leva cerca de 24 min" in page
+
+
+def confirm_original_language(client: TestClient, language: str) -> None:
+    movie = Movie.model_validate({**TMDB_MOVIE, "original_language": language})
+    details = DETAILS.dump_json(MovieDetails(kind="movie", movie=movie)).decode()
+    with Session(client.app.state.engine) as session:  # type: ignore[attr-defined]
+        row = session.exec(select(MediaFile).where(MediaFile.path == "Filme/Filme.mkv")).one()
+        row.title = Title(status="confirmed", kind="movie", label="Filme", tmdb_id=101,
+                          tmdb_json=details)  # fmt: skip
+        session.commit()
+
+
+def test_form_uses_the_original_language_from_tmdb(client: TestClient) -> None:
+    scan(client)
+    confirm_original_language(client, "pt")  # a Brazilian movie: no English track suggested
+
+    page = client.get("/folders/Filme/dvd").text
+
+    assert 'name="audio" value="2" checked' in page
+    assert 'name="audio" value="1" checked' not in page
+
+
+def test_form_ignores_a_tmdb_language_without_a_track(client: TestClient) -> None:
+    scan(client)
+    confirm_original_language(client, "fr")
+
+    page = client.get("/folders/Filme/dvd").text
+
+    assert 'name="audio" value="1" checked' in page
+    assert 'name="audio" value="2" checked' in page

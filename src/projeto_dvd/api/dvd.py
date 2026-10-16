@@ -17,6 +17,7 @@ from projeto_dvd.jobs import store
 from projeto_dvd.jobs.pipeline import preflight
 from projeto_dvd.jobs.store import JobStatus
 from projeto_dvd.library.scan import FolderView, Status, folder_view
+from projeto_dvd.metadata.curation import original_language
 from projeto_dvd.planner.calculator import Estimate, estimate
 from projeto_dvd.planner.disc_source import DiscSource, folder_reasons, prepare, run_capture
 from projeto_dvd.planner.dvd_plan import (
@@ -97,8 +98,8 @@ def dvd_form(
     source = _source(session, media_dir, name, folder)
     if not isinstance(source, DiscSource):
         return _redirect(request, "folder", name=name)
-    choices = suggest_choices(source.summary, source.options, _duration(source))
-    return _render_form(request, settings, source, choices, errors=[])
+    choices = _suggest(session, source)
+    return _render_form(request, session, settings, source, choices, errors=[])
 
 
 @router.post("/folders/{name}/dvd/estimate", response_class=HTMLResponse, name="dvd_estimate")
@@ -109,7 +110,7 @@ async def dvd_estimate(
     source = _source(session, media_dir, name, folder)
     if choices is None or not isinstance(source, DiscSource):
         return HTMLResponse(f'<p class="banner banner-error">{INVALID_FORM}</p>')
-    context = _cards_context(source, choices)
+    context = _cards_context(session, source, choices)
     return templates.TemplateResponse(request, "_profile_cards.html", context)
 
 
@@ -130,8 +131,8 @@ async def create_dvd(
         return _redirect(request, "folder", name=name)
     choices = parse_choices(await _form(request))
     if choices is None:
-        default = suggest_choices(source.summary, source.options, _duration(source))
-        return _render_form(request, settings, source, default, errors=[INVALID_FORM])
+        default = _suggest(session, source)
+        return _render_form(request, session, settings, source, default, errors=[INVALID_FORM])
     errors = validate_choices(choices, source.summary, source.options)
     if not errors:
         plan = build_plan(
@@ -153,7 +154,7 @@ async def create_dvd(
             choices.replace_iso,
         )
     if errors:
-        return _render_form(request, settings, source, choices, errors)
+        return _render_form(request, session, settings, source, choices, errors)
     try:
         job_id = store.enqueue(session, plan)
     except store.ActiveJobError as error:
@@ -189,19 +190,29 @@ def _duration(source: DiscSource) -> float:
     return source.summary.duration or 0.0
 
 
-def _cards_context(source: DiscSource, choices: Choices) -> dict[str, object]:
+def _suggest(session: Session, source: DiscSource) -> Choices:
+    language = original_language(session, source.video.path)
+    return suggest_choices(source.summary, source.options, _duration(source), language)
+
+
+def _cards_context(session: Session, source: DiscSource, choices: Choices) -> dict[str, object]:
     duration = _duration(source)
     kbps = audio_kbps(source.summary, choices)
     estimates: list[Estimate] = [
         estimate(profile, duration, kbps, len(choices.subtitles)) for profile in PROFILES.values()
     ]
-    suggested = suggest_choices(source.summary, source.options, duration).profile
+    suggested = _suggest(session, source).profile
     chosen = next((e for e in estimates if e.profile.key == choices.profile), None)
     return {"estimates": estimates, "choices": choices, "suggested": suggested, "chosen": chosen}
 
 
 def _render_form(
-    request: Request, settings: Settings, source: DiscSource, choices: Choices, errors: list[str]
+    request: Request,
+    session: Session,
+    settings: Settings,
+    source: DiscSource,
+    choices: Choices,
+    errors: list[str],
 ) -> HTMLResponse:
     video = source.summary.video
     assert video is not None
@@ -218,6 +229,6 @@ def _render_form(
         "outputs": {t.index: audio_output(t) for t in source.summary.audio},
         "chapters": chapters,
         "existing": existing if existing.exists() else None,
-        **_cards_context(source, choices),
+        **_cards_context(session, source, choices),
     }
     return templates.TemplateResponse(request, "dvd_form.html", context)

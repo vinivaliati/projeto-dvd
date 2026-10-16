@@ -121,8 +121,14 @@ class Choices(BaseModel):
     replace_iso: bool = False
 
 
-def suggest_choices(summary: Summary, options: list[SubtitleOption], duration: float) -> Choices:
-    picked = _suggest_audio(summary)
+def suggest_choices(
+    summary: Summary,
+    options: list[SubtitleOption],
+    duration: float,
+    original_language: str | None = None,
+) -> Choices:
+    """original_language comes from TMDB when the title is confirmed (ISO 639-1)."""
+    picked = _suggest_audio(summary, original_language)
     first = next((t.index for t in summary.audio if t.index in picked and _is_pt(t)), picked[0])
     first_track = next(t for t in summary.audio if t.index == first)
     subtitles = tuple(o.key for o in options if o.supported and o.language == "pt")
@@ -324,8 +330,13 @@ def build_plan(
     )  # fmt: skip
 
 
-def _suggest_audio(summary: Summary) -> tuple[int, ...]:
+def _suggest_audio(summary: Summary, original_language: str | None) -> tuple[int, ...]:
     original = dvd_language(summary.audio[0].language)
+    # TMDB knows the original language; use it only if the file has that track (TMDB also
+    # has codes like "cn" and "xx").
+    tmdb = dvd_language(original_language)
+    if tmdb and any(dvd_language(t.language) == tmdb for t in summary.audio):
+        original = tmdb
     wanted = {"pt", original} if any(_is_pt(t) for t in summary.audio) else {original}
     best: dict[str | None, AudioTrack] = {}
     for track in summary.audio:
