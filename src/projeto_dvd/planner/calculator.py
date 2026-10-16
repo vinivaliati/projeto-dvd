@@ -11,6 +11,8 @@ SUBTITLE_PEAK_KBPS = 40
 SUBTITLE_AVERAGE_KBPS = 10
 # A target equal to maxrate turns the 2-pass VBR into CBR (no room for the hard scenes).
 VBR_HEADROOM = 0.95
+# A still menu page: about a second of MPEG-2 plus the buttons (measured 90 KB to 1.2 MB).
+MENU_PAGE_BYTES = 2 * 1024 * 1024
 
 
 class Quality(StrEnum):
@@ -18,6 +20,13 @@ class Quality(StrEnum):
     ACCEPTABLE = "Aceitável"
     LOW = "Baixa"
     DOES_NOT_FIT = "Não cabe"
+
+
+@dataclass(frozen=True)
+class TitleLoad:
+    duration: float
+    audio_kbps: tuple[int, ...]
+    subtitles: int
 
 
 @dataclass(frozen=True)
@@ -42,16 +51,26 @@ def maxrate_kbps(profile: DiscProfile, audio_kbps: Sequence[int], subtitles: int
 def estimate(
     profile: DiscProfile, duration: float, audio_kbps: Sequence[int], subtitles: int
 ) -> Estimate:
-    other_kbps = sum(audio_kbps) + SUBTITLE_AVERAGE_KBPS * subtitles
-    total_kbps = profile.usable_bytes * 8 / (1 + profile.mux_overhead) / duration / 1000
-    maxrate = maxrate_kbps(profile, audio_kbps, subtitles)
-    video = int(min(total_kbps - other_kbps, VBR_HEADROOM * maxrate))
-    size = (video + other_kbps) * 1000 * duration * (1 + profile.mux_overhead) / 8
+    return estimate_disc(profile, [TitleLoad(duration, tuple(audio_kbps), subtitles)], 0)
+
+
+def estimate_disc(profile: DiscProfile, titles: Sequence[TitleLoad], menu_pages: int) -> Estimate:
+    """One video bitrate for every title: the same quality from the first to the last."""
+    duration = sum(title.duration for title in titles)
+    if duration <= 0:
+        raise ValueError("disc without duration")
+    menus = menu_pages * MENU_PAGE_BYTES
+    other_kilobits = sum(title.duration * _other_kbps(title) for title in titles)
+    room_kilobits = (profile.usable_bytes - menus) * 8 / (1 + profile.mux_overhead) / 1000
+    maxrate = min(maxrate_kbps(profile, t.audio_kbps, t.subtitles) for t in titles)
+    video = int(min((room_kilobits - other_kilobits) / duration, VBR_HEADROOM * maxrate))
+    kilobits = sum(title.duration * (video + _other_kbps(title)) for title in titles)
+    size = kilobits * 1000 * (1 + profile.mux_overhead) / 8
     return Estimate(
         profile=profile,
         video_kbps=video,
         maxrate_kbps=maxrate,
-        size_bytes=int(size) + profile.reserve_bytes,
+        size_bytes=int(size) + profile.reserve_bytes + menus,
         quality=_quality(profile, video),
     )
 
@@ -62,6 +81,10 @@ def suggest_profile(estimates: Sequence[Estimate]) -> DiscProfile:
         if item.quality == Quality.GREAT:
             return item.profile
     return estimates[-1].profile
+
+
+def _other_kbps(title: TitleLoad) -> float:
+    return sum(title.audio_kbps) + SUBTITLE_AVERAGE_KBPS * title.subtitles
 
 
 def _quality(profile: DiscProfile, video_kbps: int) -> Quality:

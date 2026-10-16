@@ -1,6 +1,14 @@
 import pytest
 
-from projeto_dvd.planner.calculator import Quality, estimate, maxrate_kbps, suggest_profile
+from projeto_dvd.planner.calculator import (
+    MENU_PAGE_BYTES,
+    Quality,
+    TitleLoad,
+    estimate,
+    estimate_disc,
+    maxrate_kbps,
+    suggest_profile,
+)
 from projeto_dvd.planner.profiles import DVD5, DVD9, PROFILES, DiscProfile
 
 TWO_HOURS = 7200.0
@@ -72,3 +80,46 @@ def test_profile_is_configuration() -> None:
     tiny = DiscProfile(key="t", name="T", description="teste", sectors=5000)
 
     assert tiny.capacity_bytes == 5000 * 2048
+
+
+@pytest.mark.parametrize("duration", [1800.0, 7200.0, 20000.0])
+def test_one_title_without_menus_is_the_single_title_estimate(duration: float) -> None:
+    single = estimate(DVD9, duration, [448, 192], 1)
+
+    disc = estimate_disc(DVD9, [TitleLoad(duration, (448, 192), 1)], menu_pages=0)
+
+    assert disc == single
+
+
+def test_titles_share_one_video_bitrate_capped_by_the_smallest_maxrate() -> None:
+    loads = [TitleLoad(300.0, (448,) * 8, 0), TitleLoad(300.0, (192,), 0)]
+
+    result = estimate_disc(DVD9, loads, menu_pages=0)
+
+    assert result.maxrate_kbps == maxrate_kbps(DVD9, [448] * 8, 0)
+    assert result.video_kbps == int(0.95 * result.maxrate_kbps)
+
+
+def test_menu_pages_take_space_from_the_video() -> None:
+    loads = [TitleLoad(5400.0, (448,), 0), TitleLoad(5400.0, (448,), 0)]
+    without = estimate_disc(DVD9, loads, menu_pages=0)
+
+    with_menus = estimate_disc(DVD9, loads, menu_pages=10)
+
+    assert with_menus.video_kbps < without.video_kbps
+    assert with_menus.size_bytes <= DVD9.usable_bytes + DVD9.reserve_bytes
+    assert with_menus.size_bytes - without.size_bytes < 10 * MENU_PAGE_BYTES
+
+
+def test_menu_bytes_count_in_the_size_when_capped() -> None:
+    loads = [TitleLoad(60.0, (192,), 0)]
+
+    assert (
+        estimate_disc(DVD5, loads, 3).size_bytes - estimate_disc(DVD5, loads, 0).size_bytes
+        == 3 * MENU_PAGE_BYTES
+    )
+
+
+def test_a_disc_without_duration_is_an_error() -> None:
+    with pytest.raises(ValueError, match="disc without duration"):
+        estimate_disc(DVD9, [TitleLoad(0.0, (192,), 0)], menu_pages=1)
