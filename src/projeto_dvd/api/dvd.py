@@ -10,6 +10,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from pydantic import ValidationError
 from sqlmodel import Session
+from starlette.concurrency import run_in_threadpool
 
 from projeto_dvd.api.deps import FolderDep, MediaDirDep, SessionDep, SettingsDep, templates
 from projeto_dvd.api.formatting import ENCODE_SECONDS_PER_SECOND
@@ -51,6 +52,7 @@ from projeto_dvd.planner.disc_source import (
     theme_image,
 )
 from projeto_dvd.planner.languages import language_name
+from projeto_dvd.planner.source import check_video
 
 router = APIRouter()
 INVALID_FORM = "Formulário inválido. Recarregue a página."
@@ -105,13 +107,15 @@ def parse_disc_form(form: Mapping[str, list[str]], disc: Disc) -> DiscChoices | 
         j = i - 1 if direction == "up" else i + 1
         if 0 <= i < len(order) and 0 <= j < len(order):
             order[i], order[j] = order[j], order[i]
-    audio = [lang for lang in audio_languages(disc.titles) if lang in form.get("audio", [])]
-    first = one("first_audio")
+    # A language marked to play first, or turned on, is on the disc even if its box is not.
+    first, on = one("first_audio"), one("subtitle_on")
+    audio = [lang for lang in audio_languages(disc.titles)
+             if lang in form.get("audio", []) or lang == first]  # fmt: skip
     if first in audio:
         audio.remove(first)
         audio.insert(0, first)
     subtitles = [lang for lang in subtitle_languages(disc.titles)
-                 if lang in form.get("subtitle", [])]  # fmt: skip
+                 if lang in form.get("subtitle", []) or lang == on]  # fmt: skip
     backdrop = one("backdrop") or None
     fields = {
         "kind": one("kind"), "order": tuple(order), "profile": one("profile"),
@@ -220,12 +224,8 @@ async def create_dvd(
     errors = disc_errors(choices, disc.titles, estimate, confirm_low)
     sources: list[TitleSource] = []
     if not errors:
-        for title in disc.titles:
-            source = prepare_title(title, _cached_capture(title))
-            if isinstance(source, tuple):
-                errors += [f"{title.path.split('/', 1)[1]}: {reason}" for reason in source]
-            else:
-                sources.append(source)
+        # Up to 2 minutes per DVD rip: off the event loop, so the other pages keep answering.
+        sources, errors = await run_in_threadpool(prepare_titles, disc.titles)
     if not errors:
         menu = disc_menu(choices, disc.titles, name, settings.output_dir)
         plan = build_disc_plan(name, sources, choices, menu, confirm_low, replace_iso)
@@ -239,6 +239,19 @@ async def create_dvd(
     except store.ActiveJobError as error:
         job_id = error.job_id
     return _redirect(request, "job_page", job_id=job_id)
+
+
+def prepare_titles(titles: Sequence[DiscTitle]) -> tuple[list[TitleSource], list[str]]:
+    """The video mode of each title (the frame scan of DVD rips), or why it cannot go on."""
+    sources: list[TitleSource] = []
+    errors: list[str] = []
+    for title in titles:
+        source = prepare_title(title, _cached_capture(title))
+        if isinstance(source, tuple):
+            errors += [f"{title.path.split('/', 1)[1]}: {reason}" for reason in source]
+        else:
+            sources.append(source)
+    return sources, errors
 
 
 def _disc(
@@ -315,6 +328,7 @@ def _render(
         "palette": PALETTE, "auto_key": auto_accent(image), "titles_changed": titles_changed,
         "existing": existing if existing.exists() else None,
         "confirm_low": confirm_low, "replace_iso": replace_iso,
+        "frame_scan": any(check_video(t.summary).needs_frame_scan for t in disc.titles),
         "encode_seconds": sum(
             (t.summary.duration or 0.0)
             * ENCODE_SECONDS_PER_SECOND[bool(t.summary.video and t.summary.video.height > 576)]

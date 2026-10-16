@@ -3,6 +3,7 @@ import json
 import shutil
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 from urllib.parse import quote
 
 import pytest
@@ -306,7 +307,9 @@ def test_second_click_goes_to_the_same_job(client: TestClient) -> None:
 def test_create_with_errors_keeps_the_page(client: TestClient) -> None:
     scan(client)
 
-    response = client.post("/folders/Filme/dvd", headers=SAME, data=disc_form(audio=[]))
+    response = client.post(
+        "/folders/Filme/dvd", headers=SAME, data=disc_form(audio=[], first_audio="")
+    )
     broken = client.post("/folders/Filme/dvd", headers=SAME, data=disc_form(minutes="abc"))
 
     assert "Escolha ao menos um idioma de áudio." in response.text
@@ -473,3 +476,56 @@ def test_a_series_lists_its_pages(client: TestClient) -> None:
     for name in ("Principal", "Lista 1", "Áudio: Inglês", "Legendas: Sem legenda",
                  "Legendas: Português"):  # fmt: skip
         assert name in page
+
+
+def test_the_frame_scan_runs_off_the_event_loop(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    scan(client)
+    calls: list[str] = []
+
+    async def threadpool(function: Any, *args: Any) -> Any:
+        calls.append(function.__name__)
+        return function(*args)
+
+    monkeypatch.setattr(dvd, "run_in_threadpool", threadpool)
+    client.post("/folders/Filme/dvd", headers=SAME, data=disc_form(), follow_redirects=False)
+
+    assert calls == ["prepare_titles"]
+
+
+def test_a_dvd_rip_warns_that_generating_takes_minutes(
+    client: TestClient, probe_data: dict[str, object]
+) -> None:
+    streams = probe_data["streams"]
+    assert isinstance(streams, list)
+    streams[0].update(codec_name="mpeg2video", width=720, height=480, r_frame_rate="30000/1001",
+                      display_aspect_ratio="16:9")  # fmt: skip
+    scan(client)
+
+    assert "pode levar alguns minutos" in client.get("/folders/Filme/dvd").text
+
+
+def test_an_h264_folder_has_no_frame_scan_notice(client: TestClient) -> None:
+    scan(client)
+
+    assert "pode levar alguns minutos" not in client.get("/folders/Filme/dvd").text
+
+
+def test_the_language_turned_on_is_always_on_the_disc(client: TestClient) -> None:
+    scan(client)
+    form = disc_form(audio=["en"], first_audio="pt", subtitle=[], subtitle_on="pt")
+
+    client.post("/folders/Filme/dvd/choices", headers=SAME, data=form)
+
+    choices = saved(client)
+    assert choices is not None
+    assert (choices.audio, choices.subtitles, choices.subtitle_on) == (("pt", "en"), ("pt",), "pt")
+
+
+def test_the_radios_check_their_language_on_the_page(client: TestClient) -> None:
+    scan(client)
+
+    page = client.get("/folders/Filme/dvd").text
+
+    assert page.count("closest('.track').querySelector('input[type=checkbox]').checked = true") == 3

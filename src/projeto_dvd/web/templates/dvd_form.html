@@ -4,6 +4,9 @@
 <a class="back" href="{{ url_for('folder', name=disc.name | urlencode) }}">← {{ disc.name }}</a>
 <h1>Montar DVD de <span class="folder-name">{{ disc.name }}</span></h1>
 <p class="muted">{{ ordered | length }} título{{ "s" if ordered | length != 1 }}. Ao colocar o disco, o menu abre; tudo que você muda aqui fica salvo. A geração leva {{ encode_seconds | remaining }}.</p>
+{% if frame_scan %}
+<p class="banner">Esta pasta tem rip de DVD: ao clicar em Gerar, o app examina os quadros de cada um, e isso pode levar alguns minutos antes de o job começar.</p>
+{% endif %}
 {% if errors %}
 <div class="banner banner-error" role="alert"><ul>{% for error in errors %}<li>{{ error }}</li>{% endfor %}</ul></div>
 {% endif %}
@@ -25,14 +28,14 @@
     {% for lang in audio_languages %}
     <div class="track">
       <label><input type="checkbox" name="audio" value="{{ lang }}"{% if lang in choices.audio %} checked{% endif %}> {{ language_name(lang) }}</label>
-      <label class="radio"><input type="radio" name="first_audio" value="{{ lang }}"{% if choices.audio and choices.audio[0] == lang %} checked{% endif %}> Toca primeiro</label>
+      <label class="radio"><input type="radio" name="first_audio" value="{{ lang }}"{% if choices.audio and choices.audio[0] == lang %} checked{% endif %} onchange="this.closest('.track').querySelector('input[type=checkbox]').checked = true"> Toca primeiro</label>
     </div>
     {% endfor %}
     <h3>Legendas</h3>
     {% for lang in subtitle_languages %}
     <div class="track">
       <label><input type="checkbox" name="subtitle" value="{{ lang }}"{% if lang in choices.subtitles %} checked{% endif %}> {{ language_name(lang) }}</label>
-      <label class="radio"><input type="radio" name="subtitle_on" value="{{ lang }}"{% if choices.subtitle_on == lang %} checked{% endif %}> Ligada ao iniciar</label>
+      <label class="radio"><input type="radio" name="subtitle_on" value="{{ lang }}"{% if choices.subtitle_on == lang %} checked{% endif %} onchange="this.closest('.track').querySelector('input[type=checkbox]').checked = true"> Ligada ao iniciar</label>
     </div>
     {% else %}
     <p class="muted">Nenhum vídeo tem legenda em texto. Para incluir uma, coloque um .srt ao lado do vídeo e escaneie de novo.</p>
