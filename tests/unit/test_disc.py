@@ -56,8 +56,9 @@ def title(
     info: TitleInfo | None = None,
     external: tuple[ExternalSubtitle, ...] = (),
     duration: float = 2700.0,
+    video_stream: dict[str, Any] = VIDEO,
 ) -> DiscTitle:
-    streams = [VIDEO, *(audio_tracks if audio_tracks is not None else [audio(1, "por")]),
+    streams = [video_stream, *(audio_tracks if audio_tracks is not None else [audio(1, "por")]),
                *(subtitles or [])]  # fmt: skip
     data = {
         "streams": streams,
