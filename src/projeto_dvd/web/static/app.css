@@ -268,3 +268,34 @@ input[type="radio"], input[type="checkbox"] { accent-color: var(--text); }
 .help-line { grid-column: 1 / -1; margin: 0; }
 [aria-invalid="true"] { outline: 2px solid var(--error); }
 .dvd-block { margin: 16px 0; }
+
+/* TMDB match (phase 2) */
+.button.small { padding: 4px 12px; font-size: 0.9rem; min-height: 36px; }
+.tmdb { margin: 24px 0; }
+.tmdb h2 { font-size: 1.1rem; margin: 0 0 8px; }
+.tmdb-actions { margin-top: 0; align-items: center; }
+.title-cards { list-style: none; padding: 0; margin: 12px 0; display: grid; gap: 8px; }
+.title-card { display: flex; flex-wrap: wrap; gap: 12px; align-items: center;
+  padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--surface); }
+.title-text { flex: 1 1 240px; min-width: 0; }
+.title-text .file-name { font-size: 0.8rem; overflow-wrap: anywhere; }
+.title-label { overflow-wrap: anywhere; }
+.title-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.error-text { color: var(--error); }
+.thumb { width: 46px; height: 69px; flex: none; border-radius: 4px; object-fit: cover;
+  background: var(--border); display: inline-block; }
+.search-form { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: end; width: 100%; }
+.search-form .file-name { width: 100%; }
+.search-form fieldset { border: 0; padding: 0; margin: 0; display: flex; gap: 12px; }
+.search-form:has(input[value="movie"]:checked) .episode-only { display: none; }
+.results { list-style: none; padding: 0; margin: 4px 0 0; display: grid; gap: 6px; width: 100%; }
+.results button { display: flex; gap: 12px; width: 100%; text-align: left; padding: 6px;
+  background: var(--bg); color: var(--text); border: 1px solid var(--border);
+  border-radius: var(--radius); cursor: pointer; font: inherit; }
+.results button:hover, .results button:focus-visible { border-color: var(--accent); }
+.results .overview { display: block; font-size: 0.85rem; }
+.search-form input[type="search"], .search-form input[inputmode] { font: inherit;
+  padding: 6px 8px; background: var(--bg); color: var(--text);
+  border: 1px solid var(--border); border-radius: 4px; }
+.search-form input[type="search"] { min-width: 12em; }

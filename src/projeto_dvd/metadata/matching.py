@@ -4,7 +4,7 @@ import re
 import unicodedata
 from collections import Counter
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Literal
 
 from projeto_dvd.metadata.art import episode_code
@@ -16,6 +16,9 @@ from projeto_dvd.metadata.tmdb_models import SearchResult, Season
 Status = Literal["suggested", "doubtful", "confirmed", "not_found"]
 
 NOTHING = "Nada encontrado para '{0}'. Use Corrigir."
+FROM_FOLDER = (
+    "O nome do arquivo não diz qual título é; a sugestão veio do nome da pasta. Pode ser um extra."
+)
 MANY_GENERIC = "Os nomes dos arquivos não dizem qual filme é cada um. Use Corrigir."
 SHORT_MOVIE = "Arquivo curto para um filme (menos de 40 min). Pode ser um extra: confira."
 NO_EPISODE = "Não deu para saber o episódio pelo nome do arquivo. Use Corrigir."
@@ -99,6 +102,10 @@ def suggest_folder(
             found[file_id] = _not_found(guess, MANY_GENERIC)
         else:
             found[file_id] = suggest(guess, duration, lookup)
+        lone = len(files) == 1
+        if guess.from_folder and not lone and found[file_id].status == "suggested":
+            # Next to other videos, a file that says nothing is often an extra.
+            found[file_id] = replace(found[file_id], status="doubtful", message=FROM_FOLDER)
     return found
 
 

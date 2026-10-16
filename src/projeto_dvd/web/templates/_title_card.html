@@ -1,0 +1,44 @@
+{% set t = card.title %}
+<li class="title-card" id="title-{{ card.file_id }}" aria-live="polite">
+  {% if t and t.poster_path %}
+  <img class="thumb" src="https://image.tmdb.org/t/p/w92{{ t.poster_path }}" width="46" height="69" loading="lazy" alt="">
+  {% else %}
+  <span class="thumb" aria-hidden="true"></span>
+  {% endif %}
+  <div class="title-text">
+    <div class="file-name muted">{{ card.name }}</div>
+    {% if not t %}
+    <div class="muted">Ainda não buscado</div>
+    {% elif t.status == "not_found" %}
+    <div>Não encontrado</div>
+    {% else %}
+    <div>
+      {% if t.status == "confirmed" %}<span class="badge badge-ok">Confirmado</span>
+      {% elif t.status == "doubtful" %}<span class="badge badge-warnings">Confira</span>
+      {% else %}<span class="badge">Sugestão</span>{% endif %}
+      <span class="title-label">{{ t.label }}</span>
+    </div>
+    {% endif %}
+    {% if t and t.message %}
+    <div class="warning-text"><span aria-hidden="true">&#x26A0;&#xFE0E;</span> {{ t.message }}</div>
+    {% endif %}
+    {% if card_error %}<div class="error-text" role="alert">{{ card_error }}</div>{% endif %}
+  </div>
+  {% if enabled %}
+  <div class="title-actions">
+    {% if t and t.status in ("suggested", "doubtful") and t.tmdb_id %}
+    <button class="button small secondary" type="button"
+            hx-post="{{ url_for('choose_title', file_id=card.file_id) }}" hx-vals="{{ card.choice_json }}"
+            hx-target="closest li" hx-swap="outerHTML" hx-disabled-elt="this">Confirmar</button>
+    {% endif %}
+    {% if card.art_failed %}
+    <button class="button small secondary" type="button"
+            hx-post="{{ url_for('title_art', file_id=card.file_id) }}"
+            hx-target="closest li" hx-swap="outerHTML" hx-disabled-elt="this">Baixar artes de novo</button>
+    {% endif %}
+    <button class="button small {{ 'primary' if card.status in ('doubtful', 'not_found') else 'secondary' }}" type="button"
+            hx-post="{{ url_for('search_title', file_id=card.file_id) }}"
+            hx-target="closest li" hx-swap="outerHTML" hx-disabled-elt="this">Corrigir</button>
+  </div>
+  {% endif %}
+</li>

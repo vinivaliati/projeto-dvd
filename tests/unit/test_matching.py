@@ -6,6 +6,7 @@ import pytest
 from projeto_dvd.metadata.filename import Guess
 from projeto_dvd.metadata.matching import (
     EPISODE_DURATION,
+    FROM_FOLDER,
     MANY_GENERIC,
     MISSING_EPISODE,
     NO_EPISODE,
@@ -149,3 +150,20 @@ def test_other_season_errors_propagate() -> None:
 
     with pytest.raises(TmdbError):
         suggest(Guess("episode", "Forever Friends", None, 1, 3), None, lookup(routes))
+
+
+def test_one_generic_file_among_others_is_doubtful() -> None:
+    files = [(1, movie("Anel Mágico", 2001, from_folder=True), 9000.0),
+             (2, movie("Outro", 2001), 9000.0)]  # fmt: skip
+
+    found = suggest_folder(files, lookup({"/3/search/movie": search_page(RING)}))
+
+    assert (found[1].status, found[1].message) == ("doubtful", FROM_FOLDER)
+
+
+def test_a_lone_generic_file_uses_the_folder_safely() -> None:
+    files = [(1, movie("Anel Mágico", 2001, from_folder=True), 9000.0)]
+
+    found = suggest_folder(files, lookup({"/3/search/movie": search_page(RING)}))
+
+    assert found[1].status == "suggested"

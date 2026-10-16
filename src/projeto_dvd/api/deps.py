@@ -27,6 +27,7 @@ from projeto_dvd.api.formatting import (
 )
 from projeto_dvd.config import Settings
 from projeto_dvd.library.files import list_disc_folders
+from projeto_dvd.metadata.tmdb import TmdbClient
 
 WEB_DIR = Path(__file__).parent.parent / "web"
 
@@ -89,3 +90,16 @@ def disc_folder(media_dir: MediaDirDep, name: str) -> Path:
 
 
 FolderDep = Annotated[Path, Depends(disc_folder)]
+
+
+def get_tmdb(settings: SettingsDep) -> Iterator[TmdbClient | None]:
+    """A client per request (closed after it); None without a token."""
+    token = settings.tmdb_token.get_secret_value() if settings.tmdb_token else ""
+    if not token:
+        yield None
+        return
+    with TmdbClient(token, settings.tmdb_language) as client:
+        yield client
+
+
+TmdbDep = Annotated[TmdbClient | None, Depends(get_tmdb)]

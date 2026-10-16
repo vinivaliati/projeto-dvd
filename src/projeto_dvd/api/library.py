@@ -6,7 +6,8 @@ from datetime import UTC, datetime
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 
-from projeto_dvd.api.deps import FolderDep, MediaDirDep, SessionDep, templates
+from projeto_dvd.api.curation import tmdb_context, tmdb_enabled
+from projeto_dvd.api.deps import FolderDep, MediaDirDep, SessionDep, SettingsDep, templates
 from projeto_dvd.api.dvd import dvd_state
 from projeto_dvd.jobs import store
 from projeto_dvd.library.files import list_disc_folders
@@ -40,7 +41,12 @@ def library_page(request: Request, session: SessionDep, media_dir: MediaDirDep) 
 
 @router.get("/folders/{name}", response_class=HTMLResponse, name="folder")
 def folder_page(
-    request: Request, name: str, folder: FolderDep, session: SessionDep, media_dir: MediaDirDep
+    request: Request,
+    name: str,
+    folder: FolderDep,
+    session: SessionDep,
+    media_dir: MediaDirDep,
+    settings: SettingsDep,
 ) -> HTMLResponse:
     view = folder_view(session, media_dir, name, folder)
     # The body template is shared with the scan response: no scan result on a plain GET.
@@ -51,13 +57,19 @@ def folder_page(
         "scanning": _scanning,
         "dvd": dvd_state(session, view),
         "now": datetime.now(UTC),
+        "tmdb": tmdb_context(session, view, tmdb_enabled(settings)),
     }
     return templates.TemplateResponse(request, "folder.html", context)
 
 
 @router.post("/folders/{name}/scan", response_class=HTMLResponse, name="scan_folder")
 def scan(
-    request: Request, name: str, folder: FolderDep, session: SessionDep, media_dir: MediaDirDep
+    request: Request,
+    name: str,
+    folder: FolderDep,
+    session: SessionDep,
+    media_dir: MediaDirDep,
+    settings: SettingsDep,
 ) -> HTMLResponse:
     """Scan synchronously (sync route: runs in the thread pool) and return the folder body."""
     global _scanning
@@ -83,5 +95,6 @@ def scan(
         "scanning": _scanning,
         "dvd": dvd_state(session, view),
         "now": datetime.now(UTC),
+        "tmdb": tmdb_context(session, view, tmdb_enabled(settings)),
     }
     return templates.TemplateResponse(request, "_folder_body.html", context)
