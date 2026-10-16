@@ -1,7 +1,7 @@
 """Invented TMDB answers and a MockTransport router. Never real responses."""
 
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Any
 
 import httpx2
@@ -77,7 +77,7 @@ def search_page(*results: dict[str, Any]) -> dict[str, Any]:
 Handler = Callable[[httpx2.Request], httpx2.Response]
 
 
-def router(routes: dict[str, Any], requests: list[httpx2.Request] | None = None) -> Handler:
+def router(routes: Mapping[str, Any], requests: list[httpx2.Request] | None = None) -> Handler:
     """Answer by URL path: a dict becomes JSON 200, an int becomes that status, bytes an image."""
 
     def handle(request: httpx2.Request) -> httpx2.Response:
