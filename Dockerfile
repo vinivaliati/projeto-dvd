@@ -53,6 +53,8 @@ USER root
 RUN uv sync --frozen
 COPY tests ./tests
 USER app
+# The menus are drawn with the real DejaVu fonts here; the unit tests use Pillow's own font.
+ENV REAL_FONTS=1
 CMD ["pytest", "-m", "slow", "--no-cov", "-p", "no:cacheprovider"]
 
 # The last stage is what a plain "docker build ." produces: keep it the runtime image.

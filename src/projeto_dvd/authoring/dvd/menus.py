@@ -23,7 +23,8 @@ def menu_video_command(background: Path, aspect: str, output: Path) -> list[str]
         "ffmpeg", "-y", "-nostdin", "-loop", "1", "-framerate", "30000/1001",
         "-i", str(background), "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo", "-t", "1",
         "-vf", f"format=yuv420p,setsar={'32/27' if aspect == '16:9' else '8/9'}",
-        *CODEC_OPTIONS, "-q:v", "2", "-flags", "+cgop+ilme+ildct", "-top", "1",
+        *CODEC_OPTIONS, "-q:v", "2", "-maxrate", "9000k", "-flags", "+cgop+ilme+ildct",
+        "-top", "1",
         "-aspect", aspect, "-bsf:v", COLOR_TAGS, "-c:a", "ac3", "-b:a", "192k",
         "-f", "dvd", "-muxrate", "10080k", "-packetsize", "2048", str(output),
     ]  # fmt: skip

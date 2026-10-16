@@ -12,7 +12,7 @@ from projeto_dvd.jobs import store
 from projeto_dvd.jobs.files import job_dir
 from projeto_dvd.jobs.store import JobStatus
 from tests.client import client_for
-from tests.plans import make_plan
+from tests.plans import make_disc_plan, make_movie, movie_title
 from tests.tree import make_file
 
 SAME = {"Sec-Fetch-Site": "same-origin"}
@@ -33,7 +33,7 @@ def client(settings: Settings) -> Iterator[TestClient]:
 def new_job(client: TestClient, folder: str = "Filme") -> int:
     engine = client.app.state.engine  # type: ignore[attr-defined]
     with Session(engine) as session:
-        return store.enqueue(session, make_plan(folder=folder))
+        return store.enqueue(session, make_movie(folder=folder))
 
 
 def engine_of(client: TestClient) -> object:
@@ -197,3 +197,37 @@ def test_job_list_shows_the_job_number(client: TestClient) -> None:
     job_id = new_job(client)
 
     assert f">#{job_id}<" in client.get("/jobs").text
+
+
+def running_job(client: TestClient, step: str, titles: int = 2) -> int:
+    engine = engine_of(client)
+    plan = make_disc_plan(titles=tuple(movie_title(path=f"Filme/{n}.mkv")
+                                       for n in range(1, titles + 1)))  # fmt: skip
+    with Session(engine) as session:  # type: ignore[arg-type]
+        job_id = store.enqueue(session, plan)
+    store.claim_next(engine)  # type: ignore[arg-type]
+    store.save_progress(engine, job_id, step, 0.5)  # type: ignore[arg-type]
+    return job_id
+
+
+def test_several_titles_expand_only_the_current_one(client: TestClient) -> None:
+    job_id = running_job(client, "2:video_pass2")
+
+    text = client.get(f"/jobs/{job_id}").text
+
+    assert '<li class="step step-done">Título 1 de 2</li>' in text
+    assert "Etapa atual: Título 2 de 2 · Vídeo: 2ª passada (codificação)" in text
+    assert '<li class="step step-todo">Desenhando os menus</li>' in text
+    assert "2 títulos" in text
+
+
+def test_a_step_from_another_version_marks_nothing_current(client: TestClient) -> None:
+    job_id = running_job(client, "9:unknown", titles=1)
+
+    assert "Etapa atual" not in client.get(f"/jobs/{job_id}").text
+
+
+def test_a_phase_3_step_belongs_to_its_only_title(client: TestClient) -> None:
+    job_id = running_job(client, "audio", titles=1)
+
+    assert "Etapa atual: Áudio" in client.get(f"/jobs/{job_id}").text

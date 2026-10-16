@@ -1,4 +1,5 @@
-"""From a DvdPlan to an ISO in the output folder: encode, mux, author, check, publish.
+"""From a DiscPlan to an ISO in the output folder: encode each title, draw the menus, author,
+check, publish.
 
 Intermediate files are deleted as soon as the next step succeeds, so the work folder peaks at
 about twice the disc size. The ISO reaches the output folder only after the automatic QA.
@@ -20,23 +21,36 @@ from pathlib import Path
 from sqlmodel import Session
 
 from projeto_dvd.api.formatting import format_size
-from projeto_dvd.authoring.dvd.dvdauthor import dvdauthor_command, dvdauthor_xml
+from projeto_dvd.authoring.dvd.dvdauthor import disc_xml, dvdauthor_command
+from projeto_dvd.authoring.dvd.menus import (
+    menu_video_command,
+    page_file,
+    spumux_buttons_xml,
+    spumux_menu_command,
+)
 from projeto_dvd.authoring.dvd.mux import (
     audio_path,
     first_pts_command,
     iso_command,
+    mpg_path,
     mux_command,
     parse_first_pts,
 )
 from projeto_dvd.authoring.dvd.qa import (
+    Check,
     QaReport,
     bitstream_checks,
     decode_check,
     decode_command,
     dvd_probe_command,
     encode_check,
+    extract_menu_command,
     extract_video_command,
     isoinfo_command,
+    menu_checks,
+    menu_probe_command,
+    prefixed,
+    required_tree,
     size_checks,
     stream_checks,
     sync_check,
@@ -55,21 +69,27 @@ from projeto_dvd.config import Settings
 from projeto_dvd.db.session import make_engine, migrate
 from projeto_dvd.encode.audio import audio_command
 from projeto_dvd.encode.mpeg2 import PulldownError, apply_soft_pulldown, inspect_stream
-from projeto_dvd.encode.video import video_pass_command
+from projeto_dvd.encode.video import m2v_path, video_pass_command
+from projeto_dvd.jobs.files import cannot_write
 from projeto_dvd.jobs.runner import Canceled, ProcessRunner, RunResult, ToolError, Tools
 from projeto_dvd.library.files import list_disc_folders
 from projeto_dvd.library.probe import run_ffprobe
-from projeto_dvd.library.scan import folder_view, scan_folder
-from projeto_dvd.planner.disc_source import folder_reasons, prepare, run_capture, suggested_plan
-from projeto_dvd.planner.dvd_plan import DvdPlan, SubtitleChoice
+from projeto_dvd.library.scan import scan_folder
+from projeto_dvd.menus.layout import letterbox_layout
+from projeto_dvd.menus.render import highlight, render_page
+from projeto_dvd.planner.disc_plan import DiscPlan, TitlePlan
+from projeto_dvd.planner.disc_source import run_capture, suggested_disc_plan
+from projeto_dvd.planner.dvd_plan import SubtitleChoice
 from projeto_dvd.planner.source import VideoMode
 
 COPY_CHUNK = 16 * 1024 * 1024
 GIB = 1024**3
+FIRST_PAGE_PGC = 4  # VMGM menu PGCs 1 to 3 are the dispatchers
 SOURCE_CHANGED = (
-    "O vídeo mudou ou ficou inacessível depois que o job foi criado (o HD externo foi "
+    "O vídeo {name} mudou ou ficou inacessível depois que o job foi criado (o HD externo foi "
     "desconectado?). Escaneie a pasta e gere de novo."
 )
+OLD_PLAN = "Job criado numa versão anterior; gere de novo."
 NO_SPACE = (
     "Acabou o espaço na pasta de trabalho. Libere espaço ou apague os arquivos temporários de "
     "outros jobs."
@@ -86,21 +106,26 @@ class Step(StrEnum):
     VIDEO_PASS2 = "video_pass2"
     PULLDOWN = "pulldown"
     AUDIO = "audio"
-    SUBTITLES = "subtitles"
     MUX = "mux"
+    SUBTITLES = "subtitles"
+    MENUS = "menus"
     AUTHOR = "author"
     ISO = "iso"
     QA = "qa"
     COPY = "copy"
 
 
+TITLE_STEPS = (Step.VIDEO_PASS1, Step.VIDEO_PASS2, Step.PULLDOWN, Step.AUDIO, Step.MUX,
+               Step.SUBTITLES)  # fmt: skip
+DISC_STEPS = (Step.MENUS, Step.AUTHOR, Step.ISO, Step.QA, Step.COPY)
 STEP_LABELS = {
     Step.VIDEO_PASS1: "Vídeo: 1ª passada (análise)",
     Step.VIDEO_PASS2: "Vídeo: 2ª passada (codificação)",
     Step.PULLDOWN: "Ajuste de quadros para TV",
     Step.AUDIO: "Áudio",
+    Step.MUX: "Juntando vídeo e áudio",
     Step.SUBTITLES: "Legendas",
-    Step.MUX: "Juntando vídeo, áudio e legendas",
+    Step.MENUS: "Desenhando os menus",
     Step.AUTHOR: "Montando a estrutura do DVD",
     Step.ISO: "Criando o ISO",
     Step.QA: "Conferindo o disco",
@@ -108,9 +133,12 @@ STEP_LABELS = {
 }
 STEP_WEIGHTS = {
     Step.VIDEO_PASS1: 35, Step.VIDEO_PASS2: 45, Step.PULLDOWN: 2, Step.AUDIO: 5,
-    Step.SUBTITLES: 2, Step.MUX: 4, Step.AUTHOR: 2, Step.ISO: 2, Step.QA: 3, Step.COPY: 2,
+    Step.MUX: 4, Step.SUBTITLES: 2, Step.MENUS: 1, Step.AUTHOR: 2, Step.ISO: 2, Step.QA: 3,
+    Step.COPY: 2,
 }  # fmt: skip
+TITLE_WEIGHT = sum(STEP_WEIGHTS[step] for step in TITLE_STEPS)
 TOTAL_WEIGHT = sum(STEP_WEIGHTS.values())
+Report = Callable[[Step, float, int], None]  # (step, fraction, title; 0 for disc steps)
 
 
 class PipelineError(Exception):
@@ -142,80 +170,83 @@ class PipelineResult:
     qa_json: str | None
 
 
-def overall_progress(step: Step, fraction: float) -> float:
-    steps = list(Step)
-    done = sum(STEP_WEIGHTS[item] for item in steps[: steps.index(step)])
-    return (done + STEP_WEIGHTS[step] * fraction) / TOTAL_WEIGHT
+@dataclass(frozen=True)
+class TitleResult:
+    """What the QA needs from the encode of one title."""
+
+    pass2: RunResult
+    mux: RunResult
+    sync: Check
+
+
+def step_text(step: Step, title: int) -> str:
+    """How the job row keeps the step: '2:video_pass2' for title 2, 'iso' for the disc."""
+    return f"{title}:{step}" if title else str(step)
+
+
+def overall_progress(plan: DiscPlan, step: Step, fraction: float, title: int) -> float:
+    """Each title weighs by its duration; the disc steps come after all titles."""
+    durations = [t.duration for t in plan.titles]
+    total = sum(durations) or 1.0
+    titles_weight = TITLE_WEIGHT
+    if title:
+        before = sum(durations[: title - 1]) / total
+        share = durations[title - 1] / total
+        steps = TITLE_STEPS[: TITLE_STEPS.index(step)]
+        within = sum(STEP_WEIGHTS[s] for s in steps) + STEP_WEIGHTS[step] * fraction
+        done = titles_weight * before + share * within
+    else:
+        steps = DISC_STEPS[: DISC_STEPS.index(step)]
+        done = titles_weight + sum(STEP_WEIGHTS[s] for s in steps) + STEP_WEIGHTS[step] * fraction
+    return done / TOTAL_WEIGHT
 
 
 def run_pipeline(
-    plan: DvdPlan,
+    plan: DiscPlan,
     *,
     media_dir: Path,
     job_dir: Path,
     output_dir: Path,
     tools: Tools,
-    report: Callable[[Step, float], None],
+    report: Report,
     should_cancel: Callable[[], bool],
 ) -> PipelineResult:
-    source = media_dir / plan.path
-    _check_source(source, plan)
+    menu = plan.menu
+    if menu is None:
+        raise PipelineError(OLD_PLAN)
+    for title in plan.titles:
+        _check_source(media_dir / title.path, title)
     job_dir.mkdir(parents=True, exist_ok=True)
 
-    def begin(step: Step) -> Callable[[float], None]:
+    def begin(step: Step, title: int = 0) -> Callable[[float], None]:
         if should_cancel():
             raise Canceled
-        report(step, 0.0)
-        return lambda fraction: report(step, fraction)
+        report(step, 0.0, title)
+        return lambda fraction: report(step, fraction, title)
 
     def checkpoint() -> None:
         if should_cancel():
             raise Canceled
 
-    m2v = job_dir / "video.m2v"
-    pass2 = RunResult({}, "")
-    for number, step in ((1, Step.VIDEO_PASS1), (2, Step.VIDEO_PASS2)):
-        progress = begin(step)
-        with _tool_step(step):
-            pass2 = tools.run(
-                video_pass_command(plan, source, job_dir, 1 if number == 1 else 2),
-                duration=plan.duration, on_progress=progress,
-            )  # fmt: skip
-    for log in job_dir.glob("pass-*.log*"):
-        log.unlink()
-    if plan.mode == VideoMode.FILM:
-        begin(Step.PULLDOWN)
-        try:
-            apply_soft_pulldown(m2v, checkpoint)
-        except PulldownError as error:
-            raise PipelineError(str(error), Step.PULLDOWN) from error
-    progress = begin(Step.AUDIO)
-    for number, audio in enumerate(plan.audio, start=1):
-        with _tool_step(Step.AUDIO):
-            tools.run(audio_command(audio, source, audio_path(job_dir, number)))
-        progress(number / len(plan.audio))
-    progress = begin(Step.MUX)
-    movie = job_dir / "movie.mpg"
-    with _tool_step(Step.MUX):
-        first_pts = parse_first_pts(tools.capture(first_pts_command(m2v)))
-        mux = tools.run(mux_command(plan, job_dir, first_pts), duration=plan.duration,
-                        on_progress=progress)  # fmt: skip
-        sync = sync_check(json.loads(tools.capture(sync_probe_command(movie))), plan)
-    m2v.unlink()
-    for number in range(1, len(plan.audio) + 1):
-        audio_path(job_dir, number).unlink()
-    progress = begin(Step.SUBTITLES)
-    for number, subtitle in enumerate(plan.subtitles):
-        _render_subtitle(plan, subtitle, number, source, media_dir, job_dir, tools)
-        progress((number + 1) / len(plan.subtitles))
+    results = [
+        _encode_title(plan, number, media_dir, job_dir, tools, begin, checkpoint)
+        for number in range(1, len(plan.titles) + 1)
+    ]
+    progress = begin(Step.MENUS)
+    for index in range(len(menu.pages)):
+        _render_menu(plan, index, job_dir, tools)
+        progress((index + 1) / len(menu.pages))
     begin(Step.AUTHOR)
     xml = job_dir / "dvd.xml"
-    xml.write_text(dvdauthor_xml(plan, job_dir), encoding="utf-8")
+    xml.write_text(disc_xml(plan, job_dir), encoding="utf-8")
     shutil.rmtree(job_dir / "dvd", ignore_errors=True)  # dvdauthor appends to what exists
     with _tool_step(Step.AUTHOR):
         author = tools.run(dvdauthor_command(xml))
     vob = vob_check(job_dir / "dvd")
-    movie.unlink()
+    for number in range(1, len(plan.titles) + 1):
+        mpg_path(job_dir, number).unlink()
+    for index in range(len(menu.pages)):
+        page_file(job_dir, index).unlink()
     begin(Step.ISO)
     with _tool_step(Step.ISO):
         tools.run(iso_command(plan, job_dir))
@@ -223,19 +254,18 @@ def run_pipeline(
     iso = job_dir / "disc.iso"
     progress = begin(Step.QA)
     with _tool_step(Step.QA):
+        tree = required_tree(len(plan.titles), menus=True)
         checks = [*size_checks(iso.stat().st_size, plan), vob,
-                  tree_check(tools.capture(isoinfo_command(iso)))]  # fmt: skip
-        probe = json.loads(tools.capture(dvd_probe_command(iso)))
-        checks += stream_checks(probe, plan, _encoded_seconds(pass2, plan))
-        extracted = job_dir / "qa.m2v"
-        try:
-            tools.run(extract_video_command(iso, extracted))
-            checks += bitstream_checks(inspect_stream(extracted), plan)
-        finally:
-            extracted.unlink(missing_ok=True)
-        checks += [sync, encode_check(pass2, mux, author)]
-        decode = tools.run(decode_command(iso), duration=plan.duration, on_progress=progress)
-        checks.append(decode_check(decode.stderr))
+                  tree_check(tools.capture(isoinfo_command(iso)), tree)]  # fmt: skip
+        for number, (title, result) in enumerate(zip(plan.titles, results, strict=True), 1):
+            checks += prefixed(
+                _title_checks(iso, number, title, result, author, job_dir, tools),
+                f"t{number}", f"Título {number}",
+            )  # fmt: skip
+            progress(number / (len(plan.titles) + 1))
+        for index in range(len(menu.pages)):
+            checks += prefixed(_menu_checks(iso, index, menu.aspect, job_dir, tools),
+                               f"m{index + 1}", f"Menu {index + 1}")  # fmt: skip
     qa_report = QaReport(checks=tuple(checks), iso_bytes=iso.stat().st_size,
                          estimated_bytes=plan.estimated_bytes)  # fmt: skip
     if not qa_report.passed:
@@ -244,14 +274,133 @@ def run_pipeline(
     return PipelineResult(iso_path=iso_path, qa_json=qa_report.model_dump_json())
 
 
-def _encoded_seconds(pass2: RunResult, plan: DvdPlan) -> float:
+def _encode_title(
+    plan: DiscPlan,
+    number: int,
+    media_dir: Path,
+    job_dir: Path,
+    tools: Tools,
+    begin: Callable[[Step, int], Callable[[float], None]],
+    checkpoint: Callable[[], None],
+) -> TitleResult:
+    title = plan.titles[number - 1]
+    source = media_dir / title.path
+    _check_source(source, title)
+    m2v = m2v_path(job_dir, number)
+    pass2 = RunResult({}, "")
+    for pass_number, step in ((1, Step.VIDEO_PASS1), (2, Step.VIDEO_PASS2)):
+        progress = begin(step, number)
+        with _tool_step(step):
+            pass2 = tools.run(
+                video_pass_command(plan, number, source, job_dir, 1 if pass_number == 1 else 2),
+                duration=title.duration, on_progress=progress,
+            )  # fmt: skip
+    for log in job_dir.glob("pass-*.log*"):
+        log.unlink()
+    if title.mode == VideoMode.FILM:
+        begin(Step.PULLDOWN, number)
+        try:
+            apply_soft_pulldown(m2v, checkpoint)
+        except PulldownError as error:
+            raise PipelineError(str(error), Step.PULLDOWN) from error
+    progress = begin(Step.AUDIO, number)
+    for track, audio in enumerate(title.audio, start=1):
+        with _tool_step(Step.AUDIO):
+            tools.run(audio_command(audio, source, audio_path(job_dir, number, track)))
+        progress(track / len(title.audio))
+    progress = begin(Step.MUX, number)
+    movie = mpg_path(job_dir, number)
+    with _tool_step(Step.MUX):
+        first_pts = parse_first_pts(tools.capture(first_pts_command(m2v)))
+        mux = tools.run(mux_command(title, job_dir, number, first_pts), duration=title.duration,
+                        on_progress=progress)  # fmt: skip
+        sync = sync_check(json.loads(tools.capture(sync_probe_command(movie))), title)
+    m2v.unlink()
+    for track in range(1, len(title.audio) + 1):
+        audio_path(job_dir, number, track).unlink()
+    progress = begin(Step.SUBTITLES, number)
+    for index, subtitle in enumerate(title.subtitles):
+        _render_subtitle(title, number, subtitle, index, source, media_dir, job_dir, tools)
+        progress((index + 1) / len(title.subtitles))
+    return TitleResult(pass2=pass2, mux=mux, sync=sync)
+
+
+def _render_menu(plan: DiscPlan, index: int, job_dir: Path, tools: Tools) -> None:
+    """Background as one second of still MPEG-2, then the buttons by spumux (and, on 16:9
+    menus, a second button stream for 4:3 TVs that letterbox the menu)."""
+    assert plan.menu is not None
+    rendered = render_page(plan.menu, index)
+    names = ("background", "highlight", "select", "lb-highlight", "lb-select")
+    files = {name: job_dir / f"menu{index}.{name}.png" for name in names}
+    rendered.background.save(files["background"])
+    rendered.highlight.save(files["highlight"])
+    rendered.select.save(files["select"])
+    layouts = [(rendered.layout, files["highlight"], files["select"])]
+    if plan.menu.aspect == "16:9":
+        boxed = letterbox_layout(rendered.layout)
+        highlight(boxed, plan.menu.accent, select=False).save(files["lb-highlight"])
+        highlight(boxed, plan.menu.accent, select=True).save(files["lb-select"])
+        layouts.append((boxed, files["lb-highlight"], files["lb-select"]))
+    current = job_dir / f"menu{index}.still.mpg"
+    with _tool_step(Step.MENUS):
+        tools.run(menu_video_command(files["background"], plan.menu.aspect, current))
+        for stream, (layout, lit, chosen) in enumerate(layouts):
+            xml = job_dir / f"menu{index}.{stream}.xml"
+            xml.write_text(spumux_buttons_xml(layout, lit, chosen), encoding="utf-8")
+            following = job_dir / f"menu{index}.s{stream}.mpg"
+            tools.run(spumux_menu_command(xml, stream), stdin=current, stdout=following)
+            current.unlink()
+            xml.unlink()
+            current = following
+    os.replace(current, page_file(job_dir, index))
+    for path in files.values():
+        path.unlink(missing_ok=True)
+
+
+def _title_checks(
+    iso: Path,
+    number: int,
+    title: TitlePlan,
+    result: TitleResult,
+    author: RunResult,
+    job_dir: Path,
+    tools: Tools,
+) -> list[Check]:
+    probe = json.loads(tools.capture(dvd_probe_command(iso, number)))
+    checks = stream_checks(probe, title, _encoded_seconds(result.pass2, title))
+    extracted = job_dir / "qa.m2v"
+    try:
+        tools.run(extract_video_command(iso, extracted, number))
+        checks += bitstream_checks(inspect_stream(extracted), title.aspect)
+    finally:
+        extracted.unlink(missing_ok=True)
+    checks += [result.sync, encode_check(result.pass2, result.mux, author)]
+    decode = tools.run(decode_command(iso, number), duration=title.duration)
+    checks.append(decode_check(decode.stderr))
+    return checks
+
+
+def _menu_checks(iso: Path, index: int, aspect: str, job_dir: Path, tools: Tools) -> list[Check]:
+    pgc = index + FIRST_PAGE_PGC
+    checks = menu_checks(json.loads(tools.capture(menu_probe_command(iso, pgc))), aspect)
+    extracted = job_dir / "qa-menu.m2v"
+    try:
+        tools.run(extract_menu_command(iso, extracted, pgc))
+        report = inspect_stream(extracted)
+    finally:
+        extracted.unlink(missing_ok=True)
+    return checks + bitstream_checks(report, aspect)
+
+
+def _encoded_seconds(pass2: RunResult, plan: TitlePlan) -> float:
     """The length of the encoded video, so a longer audio in the source does not fail QA."""
     microseconds = pass2.progress.get("out_time_us", "")
     return int(microseconds) / 1e6 if microseconds.isdecimal() else plan.duration
 
 
 def _render_subtitle(
-    plan: DvdPlan,
+    plan: TitlePlan,
+    title: int,
     subtitle: SubtitleChoice,
     number: int,
     source: Path,
@@ -259,7 +408,7 @@ def _render_subtitle(
     job_dir: Path,
     tools: Tools,
 ) -> None:
-    """Draw one SRT as subpicture stream `number` into movie.mpg (spumux, stdin to stdout)."""
+    """Draw one SRT as subpicture stream `number` into the title (spumux, stdin to stdout)."""
     srt = job_dir / f"sub{number}.srt"
     with _tool_step(Step.SUBTITLES):
         if subtitle.stream_index is not None:
@@ -280,7 +429,8 @@ def _render_subtitle(
         raise PipelineError(str(error), Step.SUBTITLES) from error
     xml_file = job_dir / f"sub{number}.xml"
     xml_file.write_text(spumux_xml(srt, plan.aspect), encoding="utf-8")
-    movie, rendered = job_dir / "movie.mpg", job_dir / "movie.next.mpg"
+    movie = mpg_path(job_dir, title)
+    rendered = movie.with_suffix(".next.mpg")
     with _tool_step(Step.SUBTITLES):
         tools.run(spumux_command(xml_file, number), stdin=movie, stdout=rendered)
     os.replace(rendered, movie)
@@ -313,20 +463,14 @@ def preflight(
     return errors
 
 
-def cannot_write(label: str, folder: Path) -> str:
-    return (
-        f"Não dá para gravar na {label} ({folder}). Ela pode ter sido criada pelo Docker como "
-        "root. Para corrigir, no WSL: sudo chown 1000:1000 <a pasta correspondente do .env>."
-    )
-
-
-def _check_source(source: Path, plan: DvdPlan) -> None:
+def _check_source(source: Path, plan: TitlePlan) -> None:
+    message = SOURCE_CHANGED.format(name=source.name)
     try:
         stat = source.stat()
     except OSError as error:
-        raise PipelineError(SOURCE_CHANGED) from error
+        raise PipelineError(message) from error
     if (stat.st_size, stat.st_mtime_ns) != (plan.size, plan.mtime_ns):
-        raise PipelineError(SOURCE_CHANGED)
+        raise PipelineError(message)
 
 
 @contextmanager
@@ -344,7 +488,7 @@ def _tool_step(step: Step) -> Iterator[None]:
 def _publish(
     iso: Path,
     output_dir: Path,
-    plan: DvdPlan,
+    plan: DiscPlan,
     progress: Callable[[float], None],
     checkpoint: Callable[[], None],
 ) -> Path:
@@ -400,24 +544,19 @@ def main(argv: list[str] | None = None) -> int:
     engine = make_engine(settings.database_url)
     with Session(engine) as session:
         scan_folder(session, settings.media_dir, args.folder, folder, run_ffprobe)
-        view = folder_view(session, settings.media_dir, args.folder, folder)
+        plan = suggested_disc_plan(session, settings.media_dir, settings.output_dir,
+                                   args.folder, folder, run_capture)  # fmt: skip
     engine.dispose()
-    reasons = folder_reasons(view)
-    file = view.files[0] if len(view.files) == 1 else None
-    if reasons or file is None or file.summary is None:
-        print("\n".join(reasons or ("Nada para gerar.",)), file=sys.stderr)
+    if isinstance(plan, tuple):
+        print("\n".join(plan), file=sys.stderr)
         return 1
-    source = prepare(args.folder, file.video, file.summary, run_capture)
-    if isinstance(source, tuple):
-        print("\n".join(source), file=sys.stderr)
-        return 1
-    plan = suggested_plan(source, confirm_low=True)
     job_dir = settings.work_dir / "dev" / datetime.now().strftime("%Y%m%d-%H%M%S")
     job_dir.mkdir(parents=True)
     runner = ProcessRunner(log_path=job_dir / "job.log", should_cancel=lambda: False, cwd=job_dir)
 
-    def report(step: Step, fraction: float) -> None:
-        print(f"\r{STEP_LABELS[step]}: {fraction:.0%}   ", end="", flush=True)
+    def report(step: Step, fraction: float, title: int) -> None:
+        where = f"Título {title}: " if title else ""
+        print(f"\r{where}{STEP_LABELS[step]}: {fraction:.0%}   ", end="", flush=True)
 
     try:
         result = run_pipeline(plan, media_dir=settings.media_dir, job_dir=job_dir,

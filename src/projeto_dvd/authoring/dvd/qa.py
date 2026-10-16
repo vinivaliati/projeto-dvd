@@ -1,5 +1,8 @@
 """Automatic QA of a DVD ISO (items 1 to 3 of the checklist, and the bitstream).
 
+Each title is checked on its own (`-title N`, the global number) and so is every menu page
+with video (`-menu 1 -menu_vts 0 -pgc K`; the dispatchers have no cell and are skipped).
+
 Commands are built here and run by the pipeline; the checks are pure functions over their
 output. A failed check keeps the ISO out of the output folder.
 """
@@ -12,15 +15,12 @@ from pydantic import BaseModel, ConfigDict
 from projeto_dvd.api.formatting import format_size
 from projeto_dvd.encode.mpeg2 import NTSC_RATE_CODE, StreamReport
 from projeto_dvd.jobs.runner import RunResult
-from projeto_dvd.planner.dvd_plan import DvdPlan
+from projeto_dvd.planner.disc_plan import DiscPlan, TitlePlan
 from projeto_dvd.planner.languages import dvd_language
 from projeto_dvd.planner.profiles import PROFILES
 
 GIB = 1024**3
-REQUIRED_TREE = (
-    "/AUDIO_TS", "/VIDEO_TS/VIDEO_TS.IFO", "/VIDEO_TS/VIDEO_TS.BUP",
-    "/VIDEO_TS/VTS_01_0.IFO", "/VIDEO_TS/VTS_01_0.BUP", "/VIDEO_TS/VTS_01_1.VOB",
-)  # fmt: skip
+DISC_TREE = ("/AUDIO_TS", "/VIDEO_TS/VIDEO_TS.IFO", "/VIDEO_TS/VIDEO_TS.BUP")
 ASPECT_CODES = {"16:9": 3, "4:3": 2}
 MAX_GOP = 12
 CHAPTER_TOLERANCE = 1.0
@@ -55,7 +55,7 @@ class QaReport(BaseModel):
         return next((check for check in self.checks if not check.ok), None)
 
 
-def size_checks(iso_bytes: int, plan: DvdPlan) -> list[Check]:
+def size_checks(iso_bytes: int, plan: DiscPlan) -> list[Check]:
     profile = PROFILES[plan.profile]
     size = f"{format_size(iso_bytes)} de {format_size(profile.capacity_bytes)}"
     margin = int(profile.margin * profile.capacity_bytes)
@@ -79,21 +79,30 @@ def isoinfo_command(iso: Path) -> list[str]:
     return ["isoinfo", "-f", "-i", str(iso)]
 
 
-def tree_check(listing: str) -> Check:
+def required_tree(titles: int, menus: bool) -> tuple[str, ...]:
+    """One titleset per title; the VMGM menus live in VIDEO_TS.VOB."""
+    sets = (
+        f"/VIDEO_TS/VTS_{n:02d}_{part}" for n in range(1, titles + 1)
+        for part in ("0.IFO", "0.BUP", "1.VOB")
+    )  # fmt: skip
+    return (*DISC_TREE, *(("/VIDEO_TS/VIDEO_TS.VOB",) if menus else ()), *sets)
+
+
+def tree_check(listing: str, required: tuple[str, ...]) -> Check:
     found = {line.strip().split(";")[0].upper() for line in listing.splitlines() if line.strip()}
-    missing = [path for path in REQUIRED_TREE if path not in found]
+    missing = [path for path in required if path not in found]
     return Check(name="tree", label="Estrutura VIDEO_TS completa", ok=not missing,
                  detail="Faltando: " + ", ".join(missing) if missing else "")  # fmt: skip
 
 
-def dvd_probe_command(iso: Path) -> list[str]:
+def dvd_probe_command(iso: Path, title: int) -> list[str]:
     return [
-        "ffprobe", "-v", "error", "-f", "dvdvideo", "-title", "1", "-count_packets",
+        "ffprobe", "-v", "error", "-f", "dvdvideo", "-title", str(title), "-count_packets",
         "-show_streams", "-show_chapters", "-show_format", "-of", "json", str(iso),
     ]  # fmt: skip
 
 
-def stream_checks(probe: dict[str, Any], plan: DvdPlan, video_seconds: float) -> list[Check]:
+def stream_checks(probe: dict[str, Any], plan: TitlePlan, video_seconds: float) -> list[Check]:
     streams = probe.get("streams", [])
     by_type = {
         kind: [s for s in streams if s.get("codec_type") == kind]
@@ -128,18 +137,53 @@ def stream_checks(probe: dict[str, Any], plan: DvdPlan, video_seconds: float) ->
     ]  # fmt: skip
 
 
-def extract_video_command(iso: Path, output: Path) -> list[str]:
+def extract_video_command(iso: Path, output: Path, title: int) -> list[str]:
     return [
-        "ffmpeg", "-y", "-nostdin", "-v", "error", "-f", "dvdvideo", "-title", "1",
+        "ffmpeg", "-y", "-nostdin", "-v", "error", "-f", "dvdvideo", "-title", str(title),
         "-i", str(iso), "-map", "0:v", "-c", "copy", "-f", "mpeg2video", str(output),
     ]  # fmt: skip
 
 
-def bitstream_checks(report: StreamReport, plan: DvdPlan) -> list[Check]:
+def menu_probe_command(iso: Path, pgc: int) -> list[str]:
+    return [
+        "ffprobe", "-v", "error", "-f", "dvdvideo", "-menu", "1", "-menu_vts", "0",
+        "-pgc", str(pgc), "-count_packets", "-show_streams", "-of", "json", str(iso),
+    ]  # fmt: skip
+
+
+def extract_menu_command(iso: Path, output: Path, pgc: int) -> list[str]:
+    return [
+        "ffmpeg", "-y", "-nostdin", "-v", "error", "-f", "dvdvideo", "-menu", "1",
+        "-menu_vts", "0", "-pgc", str(pgc), "-i", str(iso), "-map", "0:v", "-c", "copy",
+        "-f", "mpeg2video", str(output),
+    ]  # fmt: skip
+
+
+def menu_checks(probe: dict[str, Any], aspect: str) -> list[Check]:
+    streams = probe.get("streams", [])
+    video: dict[str, Any] = next((s for s in streams if s.get("codec_type") == "video"), {})
+    audio = [s for s in streams if s.get("codec_type") == "audio"]
+    ok = (
+        video.get("codec_name") == "mpeg2video"
+        and (video.get("width"), video.get("height")) == (720, 480)
+        and video.get("display_aspect_ratio") == aspect
+        and [s.get("codec_name") for s in audio] == ["ac3"]
+    )
+    return [Check(name="menu", label="Menu em MPEG-2 720x480 com áudio AC-3", ok=ok,
+                  detail=_describe(video))]  # fmt: skip
+
+
+def prefixed(checks: list[Check], name: str, label: str) -> list[Check]:
+    """The checks of one title or menu page, told apart on the job page."""
+    return [c.model_copy(update={"name": f"{name}-{c.name}", "label": f"{label}: {c.label}"})
+            for c in checks]  # fmt: skip
+
+
+def bitstream_checks(report: StreamReport, aspect: str) -> list[Check]:
     flags_ok = (
         report.frame_rate_codes == {NTSC_RATE_CODE}
         and report.progressive_sequence == {0}
-        and report.aspect_codes == {ASPECT_CODES[plan.aspect]}
+        and report.aspect_codes == {ASPECT_CODES[aspect]}
     )
     return [
         Check(name="bitstream", label="Vídeo marcado como 29,97 entrelaçado (padrão DVD)",
@@ -161,7 +205,7 @@ def sync_probe_command(mpg: Path) -> list[str]:
     ]  # fmt: skip
 
 
-def sync_check(probe: dict[str, Any], plan: DvdPlan) -> Check:
+def sync_check(probe: dict[str, Any], plan: TitlePlan) -> Check:
     """Each audio starts at the first video frame plus its own delay in the source."""
     streams = probe.get("streams", [])
     first: dict[int, float] = {}
@@ -202,9 +246,10 @@ def encode_check(pass2: RunResult, mux: RunResult, author: RunResult) -> Check:
                  detail=", ".join(problems))  # fmt: skip
 
 
-def decode_command(iso: Path) -> list[str]:
+def decode_command(iso: Path, title: int) -> list[str]:
     return [
-        "ffmpeg", "-nostdin", "-v", "error", "-f", "dvdvideo", "-title", "1", "-i", str(iso),
+        "ffmpeg", "-nostdin", "-v", "error", "-f", "dvdvideo", "-title", str(title),
+        "-i", str(iso),
         "-map", "0:v", "-map", "0:a", "-progress", "pipe:1", "-nostats", "-f", "null", "-",
     ]  # fmt: skip
 
@@ -215,7 +260,7 @@ def decode_check(stderr: str) -> Check:
     errors = [
         line for line in stderr.splitlines() if line.strip() and not line.startswith("[null @")
     ]
-    return Check(name="decode", label="Disco inteiro decodificado sem erros", ok=not errors,
+    return Check(name="decode", label="Decodificado do começo ao fim sem erros", ok=not errors,
                  detail=errors[0][:200] if errors else "")  # fmt: skip
 
 

@@ -90,7 +90,8 @@ def highlight(layout: PageLayout, accent: str, select: bool) -> Image.Image:
     return image
 
 
-def render_page(plan: MenuPlan, index: int, fonts: Fonts = dejavu) -> RenderedPage:
+def render_page(plan: MenuPlan, index: int, fonts: Fonts | None = None) -> RenderedPage:
+    fonts = fonts or dejavu  # looked up at call time, so tests can swap the font
     page = plan.pages[index]
     layout = layout_page(page, plan.aspect, plan.side,
                          lambda text, size: fonts(size, True).getlength(text))  # fmt: skip
@@ -103,7 +104,7 @@ def render_page(plan: MenuPlan, index: int, fonts: Fonts = dejavu) -> RenderedPa
     )
 
 
-def preview(plan: MenuPlan, index: int, fonts: Fonts = dejavu) -> bytes:
+def preview(plan: MenuPlan, index: int, fonts: Fonts | None = None) -> bytes:
     """The page as the TV shows it when it opens: the background with its focus highlighted."""
     rendered = render_page(plan, index, fonts)
     focus = rendered.layout.buttons[plan.pages[index].focus - 1].box

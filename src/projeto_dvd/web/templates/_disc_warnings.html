@@ -1,0 +1,5 @@
+<div id="disc-warnings"{% if oob %} hx-swap-oob="true"{% endif %}>
+  {% if warnings %}
+  <div class="banner banner-warning"><ul>{% for warning in warnings %}<li>{{ warning }}</li>{% endfor %}</ul></div>
+  {% endif %}
+</div>

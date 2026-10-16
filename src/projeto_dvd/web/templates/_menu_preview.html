@@ -1,0 +1,6 @@
+<figure id="menu-preview" class="menu-preview"{% if oob %} hx-swap-oob="true"{% endif %}>
+  <img src="{{ url_for('dvd_menu_preview', name=disc.name | urlencode) }}?page={{ preview_page }}&amp;v={{ version }}"
+       alt="Prévia do menu: {{ page_names[preview_page] }}" width="720" height="480"
+       style="aspect-ratio: {{ menu.aspect | replace(':', ' / ') }}">
+  <figcaption class="muted">{{ page_names[preview_page] }} · como a TV mostra ({{ menu.aspect }})</figcaption>
+</figure>

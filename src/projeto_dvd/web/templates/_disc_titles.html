@@ -1,0 +1,24 @@
+<ol id="disc-titles" class="disc-titles"{% if oob %} hx-swap-oob="true"{% endif %}>
+  {% for title in ordered %}
+  {% set i = loop.index0 %}
+  <li class="disc-title">
+    <input type="hidden" name="order" value="{{ title.path }}">
+    <span class="disc-title-text">
+      <strong>{{ names[i] }}</strong>
+      <span class="muted">{{ title.path.split("/", 1)[1] }} · {{ title.summary.video | input_label }} · {{ title.summary.duration | duration }}</span>
+      {% if labels[i] != names[i] %}<span class="muted">No menu: {{ labels[i] }}</span>{% endif %}
+      {% for badge in badges[i] %}<span class="badge badge-warnings">{{ badge }}</span>{% endfor %}
+    </span>
+    <span class="move">
+      <button type="button" class="button small secondary" id="up-{{ i }}" aria-label="Subir {{ names[i] }}"
+              hx-post="{{ url_for('dvd_choices', name=disc.name | urlencode) }}" hx-include="#disc-form"
+              hx-vals='{"move": "{{ i }}:up"}' hx-swap="none" hx-sync="#disc-form:queue all"
+              hx-on::after-request="setTimeout(() => document.getElementById('{{ 'up-' ~ (i - 1) if i > 1 else 'down-0' }}')?.focus())"{% if loop.first %} disabled{% endif %}>▲</button>
+      <button type="button" class="button small secondary" id="down-{{ i }}" aria-label="Descer {{ names[i] }}"
+              hx-post="{{ url_for('dvd_choices', name=disc.name | urlencode) }}" hx-include="#disc-form"
+              hx-vals='{"move": "{{ i }}:down"}' hx-swap="none" hx-sync="#disc-form:queue all"
+              hx-on::after-request="setTimeout(() => document.getElementById('{{ 'down-' ~ (i + 1) if i + 2 < ordered | length else 'up-' ~ (ordered | length - 1) }}')?.focus())"{% if loop.last %} disabled{% endif %}>▼</button>
+    </span>
+  </li>
+  {% endfor %}
+</ol>

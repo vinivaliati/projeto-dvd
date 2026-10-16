@@ -3,29 +3,8 @@
 from typing import Any
 
 from projeto_dvd.planner.disc_plan import DiscPlan, MenuItem, MenuPage, MenuPlan, TitlePlan
-from projeto_dvd.planner.dvd_plan import AudioChoice, DvdPlan
+from projeto_dvd.planner.dvd_plan import AudioChoice
 from projeto_dvd.planner.source import VideoMode
-
-
-def make_plan(**overrides: Any) -> DvdPlan:
-    fields: dict[str, Any] = {
-        "folder": "Filme", "path": "Filme/Filme.mkv", "video_index": 0, "size": 100,
-        "mtime_ns": 200, "duration": 7200.0, "profile": "dvd9", "video_kbps": 8487,
-        "maxrate_kbps": 9000, "estimated_bytes": 8_000_000_000, "mode": VideoMode.FILM,
-        "top_field_first": True, "aspect": "16:9", "width": 720, "height": 356,
-        "scale": True, "hd_color": True,
-        "audio": (
-            AudioChoice(index=2, language="pt", action="ac3", channels=6, kbps=448,
-                        downmix=None, offset=0.0),
-            AudioChoice(index=1, language="en", action="copy", channels=6, kbps=448,
-                        downmix=None, offset=0.05),
-        ),
-        "subtitles": (), "subtitle_on": False, "chapters": (0.0, 300.0),
-        "confirmed_low": False, "replace_existing": False, "volume": "FILME",
-        "iso_name": "Filme.iso",
-    }  # fmt: skip
-    fields.update(overrides)
-    return DvdPlan(**fields)
 
 
 def make_title_plan(**overrides: Any) -> TitlePlan:
@@ -69,3 +48,33 @@ def make_disc_plan(**overrides: Any) -> DiscPlan:
     }  # fmt: skip
     fields.update(overrides)
     return DiscPlan(**fields)
+
+
+def movie_title(**overrides: Any) -> TitlePlan:
+    """The phase 3 test movie as one title: scope 1080p, Portuguese AC-3 and English copy."""
+    fields: dict[str, Any] = {
+        "path": "Filme/Filme.mkv", "duration": 7200.0, "width": 720, "height": 356,
+        "audio": (
+            AudioChoice(index=2, language="pt", action="ac3", channels=6, kbps=448,
+                        downmix=None, offset=0.0),
+            AudioChoice(index=1, language="en", action="copy", channels=6, kbps=448,
+                        downmix=None, offset=0.05),
+        ),
+        "menu_name": "Filme",
+    }  # fmt: skip
+    fields.update(overrides)
+    return make_title_plan(**fields)
+
+
+def make_movie(title: TitlePlan | None = None, **overrides: Any) -> DiscPlan:
+    """A one-movie disc: the menu has "Assistir" and the languages."""
+    main = MenuPage(kind="main", heading="Filme", large=True,
+                    items=(MenuItem(label="Assistir", action="play", target=1),))  # fmt: skip
+    fields: dict[str, Any] = {
+        "folder": "Filme", "video_kbps": 8487, "estimated_bytes": 8_000_000_000,
+        "volume": "FILME", "iso_name": "Filme.iso", "titles": (title or movie_title(),),
+        "menu": MenuPlan(aspect="16:9", backdrop=None, accent="#E0A526", side="left",
+                         pages=(main,)),
+    }  # fmt: skip
+    fields.update(overrides)
+    return make_disc_plan(**fields)

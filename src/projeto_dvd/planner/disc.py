@@ -142,6 +142,15 @@ def fallback_audio(title: DiscTitle, choices: DiscChoices) -> str:
     )
 
 
+def missing_languages(title: DiscTitle, choices: DiscChoices) -> list[str]:
+    """Short badges for the title list: "sem áudio Inglês", "sem legenda Inglês"."""
+    audio = [f"sem áudio {language_name(lang)}" for lang in choices.audio
+             if best_audio(title, lang) is None]  # fmt: skip
+    subtitles = [f"sem legenda {language_name(lang)}" for lang in choices.subtitles
+                 if best_subtitle(title, lang) is None]  # fmt: skip
+    return audio + subtitles
+
+
 def track_warnings(titles: Sequence[DiscTitle], choices: DiscChoices) -> tuple[str, ...]:
     by_path = {t.path: t for t in titles}
     warnings: list[str] = []

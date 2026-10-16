@@ -20,10 +20,17 @@ from sqlmodel import Session
 from projeto_dvd.config import Settings
 from projeto_dvd.db.session import is_migrated, make_engine
 from projeto_dvd.jobs import store
-from projeto_dvd.jobs.pipeline import PipelineError, QaFailed, Step, overall_progress, run_pipeline
+from projeto_dvd.jobs.pipeline import (
+    PipelineError,
+    QaFailed,
+    Step,
+    overall_progress,
+    run_pipeline,
+    step_text,
+)
 from projeto_dvd.jobs.runner import Canceled, ProcessRunner, Tools
 from projeto_dvd.jobs.store import JobStatus
-from projeto_dvd.planner.dvd_plan import DvdPlan
+from projeto_dvd.planner.disc_plan import DiscPlan
 
 RESTARTED = "O worker reiniciou no meio da geração. Gere de novo."
 STOPPED = "O worker foi parado (docker compose stop) no meio da geração. Gere de novo."
@@ -65,11 +72,11 @@ class Worker:
         with Session(self.engine) as session:
             job = store.get_job(session, job_id)
             assert job is not None
-            plan = DvdPlan.model_validate_json(job.plan_json)
+            plan = DiscPlan.model_validate_json(job.plan_json)
         job_dir = self.settings.work_dir / "jobs" / str(job_id)
         job_dir.mkdir(parents=True, exist_ok=True)
         should_cancel = self._cancel_check(job_id)
-        report = self._reporter(job_id)
+        report = self._reporter(job_id, plan)
         try:
             result = run_pipeline(
                 plan, media_dir=self.settings.media_dir, job_dir=job_dir,
@@ -111,14 +118,15 @@ class Worker:
 
         return should_cancel
 
-    def _reporter(self, job_id: int) -> Callable[[Step, float], None]:
+    def _reporter(self, job_id: int, plan: DiscPlan) -> Callable[[Step, float, int], None]:
         last = [-math.inf]
 
-        def report(step: Step, fraction: float) -> None:
+        def report(step: Step, fraction: float, title: int) -> None:
             now = self.clock()
             if fraction >= 1 or now - last[0] >= SAVE_EVERY:
                 last[0] = now
-                store.save_progress(self.engine, job_id, step, overall_progress(step, fraction))
+                progress = overall_progress(plan, step, fraction, title)
+                store.save_progress(self.engine, job_id, step_text(step, title), progress)
 
         return report
 

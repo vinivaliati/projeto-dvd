@@ -51,3 +51,10 @@ def log_tail(work_dir: Path, job_id: int, lines: int = 200) -> str:
         return ""
     with path.open(errors="replace") as log:
         return "\n".join(line.rstrip("\n") for line in deque(log, maxlen=lines))
+
+
+def cannot_write(label: str, folder: Path) -> str:
+    return (
+        f"Não dá para gravar na {label} ({folder}). Ela pode ter sido criada pelo Docker como "
+        "root. Para corrigir, no WSL: sudo chown 1000:1000 <a pasta correspondente do .env>."
+    )

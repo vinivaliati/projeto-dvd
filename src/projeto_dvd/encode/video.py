@@ -7,7 +7,7 @@ frame). Film is encoded at 23.976 and gets soft pulldown flags afterwards (encod
 from pathlib import Path
 from typing import Literal
 
-from projeto_dvd.planner.dvd_plan import DvdPlan
+from projeto_dvd.planner.disc_plan import DiscPlan, TitlePlan
 from projeto_dvd.planner.source import VideoMode
 
 FILM_RATE = "24000/1001"
@@ -23,7 +23,7 @@ CODEC_OPTIONS = [
 COLOR_TAGS = "mpeg2_metadata=colour_primaries=6:transfer_characteristics=6:matrix_coefficients=6"
 
 
-def video_filters(plan: DvdPlan) -> str:
+def video_filters(plan: TitlePlan) -> str:
     filters = []
     if plan.mode == VideoMode.HYBRID:
         filters.append("repeatfields")  # hard telecine of the film parts
@@ -41,9 +41,15 @@ def video_filters(plan: DvdPlan) -> str:
     return ",".join(filters)
 
 
+def m2v_path(job_dir: Path, number: int) -> Path:
+    return job_dir / f"title{number}.m2v"
+
+
 def video_pass_command(
-    plan: DvdPlan, source: Path, job_dir: Path, pass_number: Literal[1, 2]
+    disc: DiscPlan, number: int, source: Path, job_dir: Path, pass_number: Literal[1, 2]
 ) -> list[str]:
+    """Title `number` (1-based): every title gets the disc's video bitrate."""
+    plan = disc.titles[number - 1]
     film = plan.mode == VideoMode.FILM
     command = [
         "ffmpeg", "-y", "-nostdin", "-i", str(source.absolute()),
@@ -53,7 +59,7 @@ def video_pass_command(
         "-r", FILM_RATE if film else NTSC_RATE, "-fps_mode", "cfr",
         "-vf", video_filters(plan),
         *CODEC_OPTIONS,
-        "-b:v", f"{plan.video_kbps}k", "-maxrate", f"{plan.maxrate_kbps}k",
+        "-b:v", f"{disc.video_kbps}k", "-maxrate", f"{disc.maxrate_kbps}k",
         "-flags", "+cgop" if film else "+cgop+ilme+ildct",
     ]  # fmt: skip
     if not film:
@@ -65,4 +71,4 @@ def video_pass_command(
     ]  # fmt: skip
     if pass_number == 1:
         return [*command, "-f", "null", "-"]
-    return [*command, "-f", "mpeg2video", str(job_dir / "video.m2v")]
+    return [*command, "-f", "mpeg2video", str(m2v_path(job_dir, number))]

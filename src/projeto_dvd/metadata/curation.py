@@ -8,10 +8,11 @@ from sqlalchemy import func
 from sqlmodel import Session, col, select
 
 from projeto_dvd.db.models import MediaFile, Title
-from projeto_dvd.jobs.pipeline import cannot_write
+from projeto_dvd.jobs.files import cannot_write
 from projeto_dvd.library.probe import summarize
 from projeto_dvd.metadata.art import episode_code, pick_art, save_art
 from projeto_dvd.metadata.details import (
+    TitleInfo,
     episode_label,
     generic_episode_name,
     movie_label,
@@ -236,3 +237,14 @@ def _duration(row: MediaFile) -> float | None:
     if row.probe_json is None:
         return None
     return summarize(json.loads(row.probe_json)).duration
+
+
+def confirmed_infos(session: Session, folder: str) -> dict[str, TitleInfo]:
+    """The confirmed TMDB match of each video of a folder, by path (menus and covers)."""
+    return {
+        row.path: title_info(DETAILS.validate_json(row.title.tmdb_json))
+        for row in _folder_rows(session, folder)
+        if row.title is not None
+        and row.title.status == "confirmed"
+        and row.title.tmdb_json is not None
+    }

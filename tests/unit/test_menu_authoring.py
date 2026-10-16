@@ -57,31 +57,37 @@ def test_first_play_sets_the_registers_and_opens_the_dispatcher() -> None:
     )
 
 
-def test_the_title_dispatcher_clears_g2_before_jumping() -> None:
+def test_the_title_key_always_opens_the_main_page() -> None:
     first = vmgm_pgcs(parse(disc("series", 3)))[0]
     assert first.get("entry") == "title" and first.find("vob") is None
-    pre = text(first.find("pre"))
+    assert text(first.find("pre")) == "g2 = 0; g3 = 1024; g5 = 0; jump menu 3;"
+
+
+def test_the_title_dispatcher_clears_g2_before_jumping() -> None:
+    second = vmgm_pgcs(parse(disc("series", 3)))[1]
+    assert second.get("entry") is None and second.find("vob") is None
+    pre = text(second.find("pre"))
     assert pre.startswith("g4 = g2; g2 = 0;")
-    assert "if (g4 == 3) jump title 3;" in pre and pre.endswith("jump menu 2;")
+    assert "if (g4 == 3) jump title 3;" in pre and pre.endswith("jump menu 3;")
 
 
 def test_the_page_dispatcher_shows_the_page_or_the_current_language() -> None:
     plan = disc("series", 8, ("Português",))
-    second = vmgm_pgcs(parse(plan))[1]
-    pre = text(second.find("pre"))
-    assert second.find("vob") is None
-    # pages: 0 main, 1-2 episodes, 3-4 audio, 5-6 subtitles; page p is menu p + 3
-    assert "if (g5 == 100) { if (g0 == 0) jump menu 6; if (g0 == 1) jump menu 7; }" in pre
-    assert "if (g5 == 101) { if (g1 == 0) jump menu 8; if (g1 == 1) jump menu 9; }" in pre
-    assert "if (g5 == 2) jump menu 5;" in pre and pre.endswith("jump menu 3;")
+    third = vmgm_pgcs(parse(plan))[2]
+    pre = text(third.find("pre"))
+    assert third.find("vob") is None
+    # pages: 0 main, 1-2 episodes, 3-4 audio, 5-6 subtitles; page p is menu p + 4
+    assert "if (g5 == 100) { if (g0 == 0) jump menu 7; if (g0 == 1) jump menu 8; }" in pre
+    assert "if (g5 == 101) { if (g1 == 0) jump menu 9; if (g1 == 1) jump menu 10; }" in pre
+    assert "if (g5 == 2) jump menu 6;" in pre and pre.endswith("jump menu 4;")
 
 
 def test_visible_pages_remember_themselves_and_their_button() -> None:
-    pgcs = vmgm_pgcs(parse(disc("series", 8, ("Português",))))
-    assert text(pgcs[2].find("pre")) == "g5 = 0; button = g3;"
-    assert pgcs[2].find("vob").attrib == {"file": "/w/menu0.mpg", "pause": "inf"}  # type: ignore[union-attr]
-    assert text(pgcs[5].find("pre")) == "g5 = 100; button = 1024;"
-    assert text(pgcs[6].find("pre")) == "g5 = 100; button = 2048;"
+    pgcs = vmgm_pgcs(parse(disc("series", 8, ("Português",))))[3:]  # the visible pages
+    assert text(pgcs[0].find("pre")) == "g5 = 0; button = g3;"
+    assert pgcs[0].find("vob").attrib == {"file": "/w/menu0.mpg", "pause": "inf"}  # type: ignore[union-attr]
+    assert text(pgcs[3].find("pre")) == "g5 = 100; button = 1024;"
+    assert text(pgcs[4].find("pre")) == "g5 = 100; button = 2048;"
 
 
 def buttons(pgc: ET.Element) -> list[str]:
@@ -89,20 +95,20 @@ def buttons(pgc: ET.Element) -> list[str]:
 
 
 def test_series_buttons() -> None:
-    pgcs = vmgm_pgcs(parse(disc("series", 8, ("Português",))))
-    assert buttons(pgcs[2]) == [
+    pgcs = vmgm_pgcs(parse(disc("series", 8, ("Português",))))[3:]  # the visible pages
+    assert buttons(pgcs[0]) == [
         "g2 = 0; g3 = 1024; g5 = 0; jump title 1;",
-        "g3 = 1024; jump menu 4;",
-        "g3 = 3072; g5 = 100; jump menu 2;",
-        "g3 = 4096; g5 = 101; jump menu 2;",
+        "g3 = 1024; jump menu 5;",
+        "g3 = 3072; g5 = 100; jump menu 3;",
+        "g3 = 4096; g5 = 101; jump menu 3;",
     ]
-    episodes = buttons(pgcs[3])
+    episodes = buttons(pgcs[1])
     assert episodes[0] == "g2 = 0; g3 = 1024; g5 = 1; jump title 1;"
-    assert episodes[6:] == ["g3 = 2048; jump menu 3;", "g3 = 1024; jump menu 5;"]
-    assert buttons(pgcs[6]) == [
-        "g0 = 0; jump menu 6;", "g0 = 1; jump menu 7;", "g3 = 3072; jump menu 3;",
+    assert episodes[6:] == ["g3 = 2048; jump menu 4;", "g3 = 1024; jump menu 6;"]
+    assert buttons(pgcs[4]) == [
+        "g0 = 0; jump menu 7;", "g0 = 1; jump menu 8;", "g3 = 3072; jump menu 4;",
     ]  # fmt: skip
-    assert buttons(pgcs[8])[-1] == "g3 = 4096; jump menu 3;"
+    assert buttons(pgcs[6])[-1] == "g3 = 4096; jump menu 4;"
 
 
 def test_every_button_targets_an_existing_title_or_menu() -> None:
@@ -121,15 +127,15 @@ def posts(root: ET.Element) -> list[str]:
 
 
 def test_a_movie_returns_to_its_page_and_button() -> None:
-    assert posts(parse(disc("movies", 7)))[6] == "g2 = 0; g3 = 1024; g5 = 2; call vmgm menu 1;"
-    assert posts(parse(disc("movies", 2)))[1] == "g2 = 0; g3 = 2048; g5 = 0; call vmgm menu 1;"
+    assert posts(parse(disc("movies", 7)))[6] == "g2 = 0; g3 = 1024; g5 = 2; call vmgm menu 2;"
+    assert posts(parse(disc("movies", 2)))[1] == "g2 = 0; g3 = 2048; g5 = 0; call vmgm menu 2;"
 
 
 def test_episodes_continue_and_the_last_returns_with_episodes_highlighted() -> None:
     assert posts(parse(disc("series", 3))) == [
-        "g2 = 2; call vmgm menu 1;",
-        "g2 = 3; call vmgm menu 1;",
-        "g2 = 0; g3 = 2048; g5 = 0; call vmgm menu 1;",
+        "g2 = 2; call vmgm menu 2;",
+        "g2 = 3; call vmgm menu 2;",
+        "g2 = 0; g3 = 2048; g5 = 0; call vmgm menu 2;",
     ]
 
 
@@ -210,6 +216,8 @@ def test_menu_video_is_interlaced_and_quantizer_based() -> None:
     assert command[command.index("-flags") + 1] == "+cgop+ilme+ildct"
     assert command[command.index("-q:v") + 1] == "2"
     assert "-b:v" not in command and command[-1] == "m.mpg"
+    # ffmpeg refuses a VBV buffer size without a max rate.
+    assert command[command.index("-maxrate") + 1] == "9000k"
     assert "setsar=32/27" in command[command.index("-vf") + 1]
     assert "setsar=8/9" in " ".join(menu_video_command(Path("b"), "4:3", Path("m")))
 

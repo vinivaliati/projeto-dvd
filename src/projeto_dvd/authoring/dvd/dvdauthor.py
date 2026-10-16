@@ -7,7 +7,6 @@ from pathlib import Path
 from projeto_dvd.authoring.dvd.menus import page_file
 from projeto_dvd.menus.pages import audio_variant, page_of_title, subtitle_variant
 from projeto_dvd.planner.disc_plan import DiscPlan, MenuItem, MenuPage, TitlePlan
-from projeto_dvd.planner.dvd_plan import DvdPlan
 
 SHOW_FIRST_SUBTITLE = 64  # bit 6 = display, plus track 0
 
@@ -18,45 +17,22 @@ def chapter_time(seconds: float) -> str:
     return f"{int(hours)}:{int(minutes):02d}:{secs:06.3f}"
 
 
-def dvdauthor_xml(plan: DvdPlan, job_dir: Path) -> str:
-    root = ET.Element("dvdauthor", dest=str(job_dir / "dvd"))
-    vmgm = ET.SubElement(root, "vmgm")
-    ET.SubElement(vmgm, "fpc").text = "jump title 1;"
-    # Without a video format here dvdauthor fails with "no video format specified for VMGM".
-    ET.SubElement(ET.SubElement(vmgm, "menus"), "video", format="ntsc", aspect=plan.aspect)
-    titles = ET.SubElement(ET.SubElement(root, "titleset"), "titles")
-    video = {"format": "ntsc", "aspect": plan.aspect}
-    if plan.aspect == "16:9":
-        video["widescreen"] = "nopanscan"  # a 4:3 TV letterboxes instead of cropping
-    ET.SubElement(titles, "video", video)
-    for audio in plan.audio:
-        ET.SubElement(titles, "audio", {"lang": audio.language} if audio.language else {})
-    for subtitle in plan.subtitles:
-        attrs = {"lang": subtitle.language} if subtitle.language else {}
-        ET.SubElement(titles, "subpicture", attrs)
-    pgc = ET.SubElement(titles, "pgc")
-    # audio=0 always: otherwise the player picks by its own language setting (often English).
-    shown = SHOW_FIRST_SUBTITLE if plan.subtitle_on else 0
-    ET.SubElement(pgc, "pre").text = f"audio=0;subtitle={shown};"
-    chapters = ",".join(chapter_time(start) for start in plan.chapters)
-    ET.SubElement(pgc, "vob", file=str(job_dir / "movie.mpg"), chapters=chapters)
-    ET.SubElement(pgc, "post").text = "exit;"
-    return ET.tostring(root, encoding="unicode")
-
-
 def dvdauthor_command(xml: Path) -> list[str]:
     return ["dvdauthor", "-x", str(xml)]
 
 
 # Disc with menus. Every jump goes through the VMGM, which can reach any title:
-#   menu 1 (entry title): dispatches the next title to play (g2), always clearing g2 first,
-#          because the Title key of the remote lands here directly;
-#   menu 2: dispatches the page to show (g5) or the language page of the current g0/g1;
-#   menu p + 3: the visible page p.
+#   menu 1 (entry title): where the Title key and the Menu key land: the main page, always;
+#   menu 2: called at the end of each title: plays the next one (g2), clearing g2 first, or
+#           falls through to menu 3;
+#   menu 3: shows the page the viewer was on (g5), or the language page of the current g0/g1;
+#   menu p + 4: the visible page p.
 # Registers: g0 audio, g1 subtitle (0 off), g2 next title, g3 highlighted button (1024 x n),
 # g4 scratch, g5 page. g14 and g15 belong to dvdauthor (buttons with several commands).
 MAX_COMMANDS = 128  # per PGC (pre, post and cell commands)
-FIRST_PAGE_MENU = 3
+TITLE_DISPATCHER = 2
+PAGE_DISPATCHER = 3
+FIRST_PAGE_MENU = 4
 AUDIO_PAGES = 100  # g5 values that mean "the language page of the current choice"
 SUBTITLE_PAGES = 101
 BUTTON = 1024  # SPRM 8 keeps the button number in its high bits
@@ -77,7 +53,9 @@ def disc_xml(plan: DiscPlan, job_dir: Path) -> str:
         streams = ET.SubElement(menus, "subpicture", lang="pt")
         ET.SubElement(streams, "stream", id="0", mode="widescreen")
         ET.SubElement(streams, "stream", id="1", mode="letterbox")
-    _command_pgc(menus, title_dispatcher(len(plan.titles)), entry="title")
+    _command_pgc(menus, f"g2 = 0; g3 = {BUTTON}; g5 = 0; jump menu {PAGE_DISPATCHER};",
+                 entry="title")  # fmt: skip
+    _command_pgc(menus, title_dispatcher(len(plan.titles)))
     _command_pgc(menus, page_dispatcher(menu.pages))
     for index, page in enumerate(menu.pages):
         pgc = ET.SubElement(menus, "pgc")
@@ -103,7 +81,7 @@ def page_buttons(page: MenuPage) -> list[MenuItem]:
 
 def title_dispatcher(titles: int) -> str:
     jumps = " ".join(f"if (g4 == {n}) jump title {n};" for n in range(1, titles + 1))
-    return f"g4 = g2; g2 = 0; {jumps} jump menu 2;"
+    return f"g4 = g2; g2 = 0; {jumps} jump menu {PAGE_DISPATCHER};"
 
 
 def page_dispatcher(pages: Sequence[MenuPage]) -> str:
@@ -136,9 +114,9 @@ def button_command(pages: Sequence[MenuPage], index: int, number: int, item: Men
         case "page":
             return f"g3 = {BUTTON}; jump menu {item.target + FIRST_PAGE_MENU};"
         case "audio_menu":
-            return f"g3 = {here}; g5 = {AUDIO_PAGES}; jump menu 2;"
+            return f"g3 = {here}; g5 = {AUDIO_PAGES}; jump menu {PAGE_DISPATCHER};"
         case "subtitle_menu":
-            return f"g3 = {here}; g5 = {SUBTITLE_PAGES}; jump menu 2;"
+            return f"g3 = {here}; g5 = {SUBTITLE_PAGES}; jump menu {PAGE_DISPATCHER};"
         case "audio":
             target = audio_variant(pages, item.target)
             return f"g0 = {item.target}; jump menu {target + FIRST_PAGE_MENU};"
@@ -159,11 +137,11 @@ def title_post(plan: DiscPlan, number: int) -> str:
     pages = plan.menu.pages
     if any(item.action == "play_all" for item in pages[0].items):  # a series
         if number < len(plan.titles):
-            return f"g2 = {number + 1}; call vmgm menu 1;"
+            return f"g2 = {number + 1}; call vmgm menu {TITLE_DISPATCHER};"
         episodes = next(n for n, it in enumerate(page_buttons(pages[0]), 1) if it.action == "page")
-        return f"g2 = 0; g3 = {episodes * BUTTON}; g5 = 0; call vmgm menu 1;"
+        return f"g2 = 0; g3 = {episodes * BUTTON}; g5 = 0; call vmgm menu {TITLE_DISPATCHER};"
     page, button = page_of_title(pages, number)
-    return f"g2 = 0; g3 = {button * BUTTON}; g5 = {page}; call vmgm menu 1;"
+    return f"g2 = 0; g3 = {button * BUTTON}; g5 = {page}; call vmgm menu {TITLE_DISPATCHER};"
 
 
 def title_pre(title: TitlePlan) -> str:

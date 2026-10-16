@@ -1,6 +1,6 @@
 """From the disc choices to the plan a job runs: tracks per title, menu pages, bitrate."""
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
@@ -8,7 +8,13 @@ from PIL import Image
 
 from projeto_dvd.menus.pages import build_pages
 from projeto_dvd.menus.theme import resolve_accent
-from projeto_dvd.planner.calculator import Estimate, Quality, TitleLoad, estimate_disc
+from projeto_dvd.planner.calculator import (
+    Estimate,
+    Quality,
+    TitleLoad,
+    estimate_disc,
+    suggest_profile,
+)
 from projeto_dvd.planner.disc import (
     DiscTitle,
     best_audio,
@@ -158,3 +164,22 @@ def _subtitle(option: SubtitleOption, directory: PurePosixPath) -> SubtitleChoic
         file=str(directory / option.key[2:]) if option.key.startswith("f:") else None,
         language=option.language,
     )
+
+
+def disc_estimates(
+    choices: DiscChoices, titles: Sequence[DiscTitle], folder: str
+) -> list[Estimate]:
+    """Every profile for the whole disc, menus included; the frame scan does not matter here."""
+    by_path = {t.path: t for t in titles}
+    plans = [
+        title_plan(TitleSource(by_path[path], VideoMode.FILM, True), choices, "")
+        for path in choices.order
+        if path in by_path
+    ]
+    pages = len(menu_plan(choices, titles, folder, None, None).pages)
+    return [disc_estimate(profile, plans, pages) for profile in PROFILES.values()]
+
+
+def profile_for(titles: Sequence[DiscTitle], folder: str) -> Callable[[DiscChoices], str]:
+    """The suggested profile of a draft: the first one with great quality."""
+    return lambda draft: suggest_profile(disc_estimates(draft, titles, folder)).key
