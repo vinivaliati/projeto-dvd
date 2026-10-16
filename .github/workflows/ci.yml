@@ -30,7 +30,8 @@ jobs:
 
   docker:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    # Build, slow tests with real DVD encodes (about 1 min locally) and the end-to-end smoke.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
         with:
@@ -55,8 +56,11 @@ jobs:
           sudo chown 1000:1000 /tmp/ci/work /tmp/ci/output
           printf 'HOST_MEDIA_DIR=/tmp/ci/media\nHOST_WORK_DIR=/tmp/ci/work\nHOST_OUTPUT_DIR=/tmp/ci/output\n' > .env
 
+      # --wait only on web: newer compose versions fail --wait on a service without healthcheck.
       - name: Build and start (waits for the healthcheck)
-        run: docker compose up -d --build --wait --wait-timeout 120
+        run: |
+          docker compose up -d --build worker
+          docker compose up -d --wait --wait-timeout 120 web
 
       - name: Smoke test
         run: |
@@ -67,7 +71,7 @@ jobs:
           curl -fsS http://127.0.0.1:8000/static/app.css | grep -q -- "--accent"
           curl -fsS http://127.0.0.1:8000/health -o health.json
           cat health.json
-          jq -e '.status == "ok" and ([.tools[]] | length == 6 and all(. != null))' health.json
+          jq -e '.status == "ok" and ([.tools[]] | length == 7 and all(. != null))' health.json
           # Assign first: a failing command inside $(...) passed to test would not stop the step.
           uid="$(docker compose exec -T web id -u)"
           test "$uid" -ne 0
@@ -78,6 +82,35 @@ jobs:
           echo "/media mount options: $media_options"
           echo "$media_options" | grep -qE '^ro(,|$)'
 
+      - name: Generate a DVD end to end (web + worker)
+        run: |
+          mkdir -p "/tmp/ci/media/Disco DVD"
+          chmod 777 "/tmp/ci/media/Disco DVD"
+          docker compose run --rm --no-deps -T -v "/tmp/ci/media/Disco DVD:/gen" \
+            --entrypoint ffmpeg web -nostdin -v error \
+            -f lavfi -i testsrc2=s=1280x720:r=24000/1001:d=3 -f lavfi -i sine=d=3 \
+            -c:v libx264 -preset ultrafast -pix_fmt yuv420p -c:a aac \
+            -metadata:s:a:0 language=por /gen/clip.mkv
+          base=http://127.0.0.1:8000
+          curl -fsS -X POST -H "Sec-Fetch-Site: same-origin" "$base/folders/Disco%20DVD/scan" -o /dev/null
+          curl -fsS "$base/folders/Disco%20DVD/dvd" | grep -q "Gerar DVD"
+          job="$(curl -fsS -o /dev/null -w '%{redirect_url}' -X POST \
+            -H "Sec-Fetch-Site: same-origin" \
+            -d profile=dvd5 -d audio=1 -d first_audio=1 -d chapters=every -d minutes=5 \
+            -d subtitle_on= "$base/folders/Disco%20DVD/dvd")"
+          echo "job: $job"
+          test -n "$job"
+          for _ in $(seq 90); do
+            status="$(curl -fsS "$job/status")"
+            if echo "$status" | grep -q "Pronto!"; then break; fi
+            if echo "$status" | grep -qE "banner-error|Cancelado"; then echo "$status"; exit 1; fi
+            sleep 2
+          done
+          echo "$status" | grep -q "Pronto!"
+          iso="/tmp/ci/output/iso/Disco DVD.iso"
+          test -s "$iso"
+          test "$(stat -c %u "$iso")" -eq 1000
+
       - name: Show logs on failure
         if: failure()
-        run: docker compose logs || true
+        run: docker compose logs web worker || true

@@ -9,6 +9,10 @@
 </head>
 <body>
   <main class="page">
+    <nav class="nav" aria-label="Seções">
+      <a href="{{ url_for('library') }}">Biblioteca</a>
+      <a href="{{ url_for('jobs') }}">Jobs</a>
+    </nav>
     {% block content %}{% endblock %}
   </main>
 </body>

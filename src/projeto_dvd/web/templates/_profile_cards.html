@@ -1,0 +1,21 @@
+<div id="profiles" class="profiles">
+  {% for item in estimates %}
+  {% set p = item.profile %}
+  {% set used = (item.size_bytes / p.capacity_bytes * 100) | round | int %}
+  <label class="profile-card{% if choices.profile == p.key %} chosen{% endif %}">
+    <input type="radio" id="profile-{{ p.key }}" name="profile" value="{{ p.key }}"{% if choices.profile == p.key %} checked{% endif %}{% if item.quality == "Não cabe" %} disabled{% endif %}>
+    <span class="profile-name">{{ p.name }} · {{ p.description }}</span>
+    {% if suggested == p.key %}<span class="badge">sugerido</span>{% endif %}
+    <span class="quality quality-{{ {'Ótima': 'great', 'Aceitável': 'ok', 'Baixa': 'low', 'Não cabe': 'none'}[item.quality] }}">{{ item.quality }}</span>
+    <span class="numbers">Usa {{ item.size_bytes | size }} de {{ p.capacity_bytes | size }}</span>
+    <span class="bar"><span style="width: {{ [used, 100] | min }}%"></span></span>
+    <span class="muted numbers">vídeo a {{ "%.1f" | format(item.video_kbps / 1000) | replace(".", ",") }} Mbps</span>
+    {% if choices.profile == p.key %}<span class="chosen-label">Escolhido</span>{% endif %}
+  </label>
+  {% endfor %}
+  <p class="muted help-line">A qualidade depende de quanto espaço sobra para a imagem. Ótima a partir de 5 Mbps.{% if suggested == "dvd9" %} A mídia de dupla camada é mais cara.{% endif %}</p>
+  {% if chosen and chosen.quality == "Baixa" %}
+  <label class="confirm"><input type="checkbox" name="confirm_low" value="1"{% if choices.confirm_low %} checked{% endif %}>
+    Entendo que a qualidade vai ficar baixa e quero gerar mesmo assim</label>
+  {% endif %}
+</div>

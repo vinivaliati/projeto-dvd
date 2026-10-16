@@ -1,8 +1,9 @@
 """Brazilian Portuguese formatting for the templates (Jinja filters)."""
 
+from datetime import datetime
 from pathlib import Path
 
-from projeto_dvd.library.probe import Video
+from projeto_dvd.library.probe import AudioTrack, Video
 
 VIDEO_CODECS = {
     "h264": "H.264",
@@ -13,6 +14,16 @@ VIDEO_CODECS = {
     "vc1": "VC-1",
 }
 SIXTEEN_NINE = 16 / 9
+UNDEFINED_LANGUAGE = "não definido"
+CHANNEL_LAYOUTS = {
+    "mono": "mono",
+    "stereo": "estéreo",
+    "5.1": "5.1",
+    "5.1(side)": "5.1",
+    "7.1": "7.1",
+}
+CHANNEL_COUNTS = {1: "mono", 2: "estéreo", 6: "5.1", 8: "7.1"}
+SUBTITLE_KINDS = {"text": "texto", "image": "imagem", "unknown": "desconhecido"}
 
 
 def format_size(size: int) -> str:
@@ -57,6 +68,62 @@ def _resolution(width: int, height: int) -> str:
     return "1080p" if width > 1280 or height > 720 else "720p"
 
 
+AUDIO_CODECS = {
+    "ac3": "Dolby Digital (AC-3)",
+    "eac3": "Dolby Digital Plus",
+    "dts": "DTS",
+    "truehd": "Dolby TrueHD",
+    "aac": "AAC",
+    "flac": "FLAC",
+    "mp3": "MP3",
+    "opus": "Opus",
+}
+
+
+def format_audio_codec(codec: str) -> str:
+    if codec.startswith("pcm_"):
+        return "PCM"
+    return AUDIO_CODECS.get(codec, codec.upper())
+
+
+def input_label(video: Video) -> str:
+    """ "1080p, 23,976 quadros/s": what the form says about the source."""
+    return f"{_resolution(video.width, video.height)}, {format_fps(video.fps)} quadros/s"
+
+
+# Encode time per second of movie on a 6-core CPU, both passes (measured by the tech lead:
+# ~310 fps for 1080p H.264 sources, SD about twice as fast).
+ENCODE_SECONDS_PER_SECOND = {True: 0.2, False: 0.1}
+
+
+def format_encode_time(duration: float, hd: bool) -> str:
+    return format_remaining(duration * ENCODE_SECONDS_PER_SECOND[hd])
+
+
+def windows_path(host_dir: str, relative: str) -> str:
+    """/mnt/c/Users/x + iso/F.iso as C:\\Users\\x\\iso\\F.iso; other paths stay POSIX."""
+    parts = [part for part in host_dir.split("/") if part]
+    if len(parts) >= 2 and parts[0] == "mnt" and len(parts[1]) == 1:
+        return "\\".join([f"{parts[1].upper()}:", *parts[2:], *relative.split("/")])
+    return "/".join([host_dir.rstrip("/"), relative])
+
+
+def format_language(language: str | None) -> str:
+    return language or UNDEFINED_LANGUAGE
+
+
+def format_channels(track: AudioTrack) -> str:
+    if track.channel_layout:
+        return CHANNEL_LAYOUTS.get(track.channel_layout, track.channel_layout)
+    if track.channel_count is not None:
+        return CHANNEL_COUNTS.get(track.channel_count, f"{track.channel_count} canais")
+    return "?"
+
+
+def format_subtitle_kind(kind: str) -> str:
+    return SUBTITLE_KINDS.get(kind, kind)
+
+
 def last_line(text: str) -> str:
     """ffprobe prints the reason last; earlier lines carry memory addresses."""
     lines = text.strip().splitlines()
@@ -71,3 +138,28 @@ def probe_reason(error: str, path: Path) -> str:
 def _decimal(value: float) -> str:
     text = f"{value:.1f}" if value < 10 else f"{value:.0f}"
     return text.removesuffix(".0").replace(".", ",")
+
+
+def format_ago(value: datetime | None, now: datetime) -> str:
+    if value is None:
+        return "?"
+    minutes = int((now - value).total_seconds() // 60)
+    if minutes < 1:
+        return "agora"
+    if minutes < 60:
+        return f"há {minutes} min"
+    if minutes < 24 * 60:
+        return f"há {minutes // 60} h"
+    days = minutes // (24 * 60)
+    return f"há {days} dia{'s' if days != 1 else ''}"
+
+
+def format_remaining(seconds: float | None) -> str:
+    if seconds is None:
+        return "calculando..."
+    if seconds < 60:
+        return "menos de 1 min"
+    minutes = round(seconds / 60)
+    if minutes < 60:
+        return f"cerca de {minutes} min"
+    return f"cerca de {minutes // 60}h{minutes % 60:02d}"

@@ -186,3 +186,85 @@ button.primary[disabled] { background: var(--border); color: var(--muted); curso
 .row-error td:first-child { border-left: 4px solid var(--error); }
 
 .warning-icon, .warning-text { color: var(--warning); }
+
+/* Buttons: one primary per screen; links styled as buttons share the look. */
+.button {
+  display: inline-block;
+  padding: 8px 20px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  font: 600 1rem system-ui, sans-serif;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.button.primary { background: var(--accent); color: #121212; }
+.button.secondary { background: var(--surface); border-color: var(--border); color: var(--text); }
+.button.secondary:hover { border-color: var(--muted); }
+.button[disabled] { background: var(--border); color: var(--muted); cursor: progress; }
+
+.nav { display: flex; gap: 16px; margin-bottom: 16px; color: var(--muted); }
+.nav a { color: var(--muted); text-decoration: none; }
+.nav a:hover, .nav a[aria-current="page"] { color: var(--text); }
+
+/* Job page */
+.progress-line { display: flex; align-items: center; gap: 12px; }
+.progress-line progress { flex: 1; height: 12px; accent-color: var(--accent); }
+.steps { padding-left: 20px; }
+.step-done { color: var(--muted); }
+.step-done::marker { content: "✓  "; color: var(--ok); }
+.step-current { font-weight: 600; }
+.step-current::marker { content: "▸  "; color: var(--accent); }
+.step-todo { color: var(--muted); }
+.step-todo::marker { content: "○  "; }
+.checks { list-style: none; padding: 0; }
+.check-ok::before { content: "✓ "; color: var(--ok); }
+.check-warning::before { content: "! "; color: var(--warning); }
+.check-failed::before { content: "✗ "; color: var(--error); }
+.actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 16px; }
+.log-text { max-height: 360px; overflow: auto; padding: 12px; background: var(--surface);
+  border-radius: var(--radius); font-size: 0.8rem; white-space: pre-wrap; }
+
+/* DVD form */
+.dvd-form fieldset { margin: 16px 0; padding: 12px 16px; border: 1px solid var(--border);
+  border-radius: var(--radius); }
+.dvd-form legend { padding: 0 6px; font-weight: 600; }
+.dvd-form fieldset { min-width: 0; }
+.track { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 16px; padding: 8px 0;
+  border-bottom: 1px solid var(--border); }
+.track > .muted { grid-column: 1; }
+.track > .radio { grid-column: 2; grid-row: 1 / span 2; align-self: center; }
+.track:last-of-type { border-bottom: 0; }
+@media (max-width: 480px) {
+  .track { grid-template-columns: 1fr; }
+  .track > .radio { grid-column: 1; grid-row: auto; }
+}
+.track.unsupported { color: var(--muted); }
+.radio { white-space: normal; }
+.minutes { width: 4em; }
+.profiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+.profile-card { display: flex; flex-direction: column; gap: 4px; padding: 12px;
+  background: var(--surface); border: 2px solid var(--border); border-radius: var(--radius);
+  cursor: pointer; }
+.profile-card { position: relative; }
+.profile-card.chosen, .profile-card:has(input:checked) { border-color: var(--text); }
+.profile-card:has(input:disabled) { cursor: not-allowed; opacity: 0.6; }
+.profile-card .badge { align-self: flex-start; }
+.profile-card input { position: absolute; opacity: 0; }
+.profile-card:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+.profile-name { font-weight: 600; }
+.quality { font-weight: 700; }
+.quality-great::before { content: "● "; } .quality-great { color: var(--ok); }
+.quality-ok::before { content: "◐ "; } .quality-ok { color: #d6c25a; }
+.quality-low::before { content: "○ "; } .quality-low { color: var(--error); }
+.quality-none { color: var(--muted); }
+.quality-none::before { content: "✕ "; }
+input[type="radio"], input[type="checkbox"] { accent-color: var(--text); }
+.qa summary { cursor: pointer; margin: 16px 0 8px; font-weight: 600; }
+.bar { height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; }
+.bar > span { display: block; height: 100%; background: var(--muted); }
+.chosen-label { font-size: 0.85rem; color: var(--text); }
+.confirm { display: block; margin: 12px 0; }
+.help-line { grid-column: 1 / -1; margin: 0; }
+[aria-invalid="true"] { outline: 2px solid var(--error); }
+.dvd-block { margin: 16px 0; }

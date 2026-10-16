@@ -9,7 +9,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, SQLModel, select
 
 from projeto_dvd.db.models import MediaFile
-from projeto_dvd.db.session import make_engine, migrate
+from projeto_dvd.db.session import is_migrated, make_engine, migrate
 
 
 def make_row(path: str = "Disco/a.mkv") -> MediaFile:
@@ -74,4 +74,25 @@ def test_make_engine_does_not_create_the_table(database_url: str) -> None:
     engine = make_engine(database_url)
 
     assert inspect(engine).get_table_names() == []
+    engine.dispose()
+
+
+def test_migration_creates_the_job_table(engine: Engine) -> None:
+    columns = {column["name"] for column in inspect(engine).get_columns("job")}
+
+    assert columns == {"id", "folder", "plan_json", "status", "cancel_requested", "step",
+                       "progress", "error", "qa_json", "iso_path", "created_at", "started_at",
+                       "finished_at"}  # fmt: skip
+
+
+def test_wal_is_on(engine: Engine) -> None:
+    with engine.connect() as connection:
+        assert connection.exec_driver_sql("PRAGMA journal_mode").scalar() == "wal"
+
+
+def test_is_migrated(database_url: str) -> None:
+    engine = make_engine(database_url)
+    assert not is_migrated(engine)
+    migrate(database_url)
+    assert is_migrated(engine)
     engine.dispose()

@@ -13,6 +13,7 @@ from projeto_dvd.api import library
 from projeto_dvd.app import create_app
 from projeto_dvd.config import Settings
 from projeto_dvd.library.probe import ABOVE_1080P, HDR, FfprobeMissingError, ProbeResult
+from tests.client import client_for
 from tests.tree import make_file, snapshot
 
 MOVIE_JSON = json.dumps(
@@ -91,7 +92,7 @@ def probes(monkeypatch: pytest.MonkeyPatch) -> list[str]:
 
 @pytest.fixture
 def client(media: Path, database_url: str) -> Iterator[TestClient]:
-    with TestClient(create_app(Settings(media_dir=media, database_url=database_url))) as client:
+    with client_for(create_app(Settings(media_dir=media, database_url=database_url))) as client:
         yield client
 
 
@@ -124,7 +125,7 @@ def test_library_shows_duration_after_scan(client: TestClient, probes: list[str]
 
 def test_library_without_folders_shows_help(tmp_path: Path, database_url: str) -> None:
     app = create_app(Settings(media_dir=tmp_path / "vazio", database_url=database_url))
-    with TestClient(app) as client:
+    with client_for(app) as client:
         response = client.get("/")
 
     assert response.status_code == 200
@@ -135,7 +136,7 @@ def test_library_without_folders_shows_help(tmp_path: Path, database_url: str) -
 
 def test_empty_folder_card_does_not_ask_for_a_scan(tmp_path: Path, database_url: str) -> None:
     (tmp_path / "Vazia").mkdir()
-    with TestClient(create_app(Settings(media_dir=tmp_path, database_url=database_url))) as client:
+    with client_for(create_app(Settings(media_dir=tmp_path, database_url=database_url))) as client:
         response = client.get("/")
 
     assert "vazia" in response.text

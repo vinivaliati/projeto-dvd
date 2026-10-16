@@ -34,6 +34,8 @@ htmlcov/
 *.idx
 *.sub
 VIDEO_TS/
+*.part
+ffmpeg2pass-*
 BDMV/
 
 # Working folders and downloaded art (ignored by folder so README screenshots still work)

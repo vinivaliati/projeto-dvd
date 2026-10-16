@@ -7,6 +7,7 @@ from sqlalchemy import inspect
 from projeto_dvd.api import health
 from projeto_dvd.app import create_app
 from projeto_dvd.config import Settings
+from tests.client import client_for
 
 ALL_FOUND: dict[str, str | None] = {
     "ffmpeg": "7.1.5-0+deb13u1",
@@ -14,13 +15,14 @@ ALL_FOUND: dict[str, str | None] = {
     "dvdauthor": "0.7.2",
     "spumux": "0.7.2",
     "xorriso": "1.5.6",
+    "genisoimage": "1.1.11",
     "tsMuxeR": "2.7.0",
 }
 
 
 @pytest.fixture
 def client(tmp_path: Path, database_url: str) -> TestClient:
-    return TestClient(create_app(Settings(media_dir=tmp_path, database_url=database_url)))
+    return client_for(create_app(Settings(media_dir=tmp_path, database_url=database_url)))
 
 
 def fake_versions(monkeypatch: pytest.MonkeyPatch, versions: dict[str, str | None]) -> None:
@@ -30,7 +32,7 @@ def fake_versions(monkeypatch: pytest.MonkeyPatch, versions: dict[str, str | Non
 def test_startup_migrates_an_empty_database(tmp_path: Path, database_url: str) -> None:
     app = create_app(Settings(media_dir=tmp_path, database_url=database_url))
 
-    with TestClient(app):
+    with client_for(app):
         assert "media_file" in inspect(app.state.engine).get_table_names()
 
 

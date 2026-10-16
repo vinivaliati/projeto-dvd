@@ -1,0 +1,18 @@
+{% if dvd.visible %}
+<section class="dvd-block" id="dvd">
+  {% if dvd.active %}
+  <p class="banner">Gerando DVD: {{ (dvd.active.progress * 100) | int }}%.
+    <a href="{{ url_for('job_page', job_id=dvd.active.id) }}">Ver o job</a></p>
+  {% elif dvd.reasons %}
+  <div class="banner banner-warning">
+    <strong>Não dá para gerar o DVD desta pasta</strong>
+    <ul>{% for reason in dvd.reasons %}<li>{{ reason }}</li>{% endfor %}</ul>
+  </div>
+  {% else %}
+  <a class="button primary" href="{{ url_for('dvd_form', name=folder.name | urlencode) }}">Gerar DVD</a>
+  {% endif %}
+  {% if dvd.last_done %}
+  <p class="muted">Último ISO gerado {{ dvd.last_done.finished_at | ago(now) }} · <a href="{{ url_for('job_page', job_id=dvd.last_done.id) }}">ver o job #{{ dvd.last_done.id }}</a></p>
+  {% endif %}
+</section>
+{% endif %}

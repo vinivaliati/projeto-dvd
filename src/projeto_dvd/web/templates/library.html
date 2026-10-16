@@ -13,6 +13,7 @@
         {% else %}
         <span class="badge badge-{{ folder.status.name | lower }}">{{ folder.status }}</span>
         {% endif %}
+        {% if folder.name in active %}<span class="badge">gerando DVD</span>{% endif %}
       </span>
       <span class="muted numbers">
         {{ folder.files | length }} vídeo{{ "s" if folder.files | length != 1 }} · {{ folder.size | size }}

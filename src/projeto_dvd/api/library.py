@@ -1,40 +1,19 @@
 """Library pages: disc folders, one folder's files, and the scan."""
 
 import threading
-from collections.abc import Iterator
-from pathlib import Path
-from typing import Annotated
+from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
-from fastapi.templating import Jinja2Templates
-from sqlmodel import Session
 
-from projeto_dvd.api.formatting import (
-    format_aspect,
-    format_duration,
-    format_fps,
-    format_size,
-    probe_reason,
-    video_label,
-)
-from projeto_dvd.config import Settings
+from projeto_dvd.api.deps import FolderDep, MediaDirDep, SessionDep, templates
+from projeto_dvd.api.dvd import dvd_state
+from projeto_dvd.jobs import store
 from projeto_dvd.library.files import list_disc_folders
 from projeto_dvd.library.probe import FfprobeMissingError, run_ffprobe
 from projeto_dvd.library.scan import folder_view, purge_missing_folders, scan_folder
 
-WEB_DIR = Path(__file__).parent.parent / "web"
-
 router = APIRouter()
-templates = Jinja2Templates(directory=WEB_DIR / "templates")
-templates.env.filters.update(
-    size=format_size,
-    duration=format_duration,
-    fps=format_fps,
-    aspect=format_aspect,
-    video_label=video_label,
-    probe_reason=probe_reason,
-)
 
 # One scan at a time (per process; the app runs a single uvicorn worker): ffprobe is heavy
 # on a USB drive, and two scans of the same folder would race on the same rows.
@@ -48,39 +27,12 @@ FFPROBE_MISSING = (
 )
 
 
-def get_session(request: Request) -> Iterator[Session]:
-    with Session(request.app.state.engine) as session:
-        yield session
-
-
-SessionDep = Annotated[Session, Depends(get_session)]
-
-
-def get_media_dir(request: Request) -> Path:
-    settings: Settings = request.app.state.settings
-    return settings.media_dir
-
-
-MediaDirDep = Annotated[Path, Depends(get_media_dir)]
-
-
-def disc_folder(media_dir: MediaDirDep, name: str) -> Path:
-    """The real path of a disc folder; 404 for anything that is not one (no traversal)."""
-    folder = list_disc_folders(media_dir).get(name)
-    if folder is None:
-        raise HTTPException(status_code=404)
-    return folder
-
-
-FolderDep = Annotated[Path, Depends(disc_folder)]
-
-
 @router.get("/", response_class=HTMLResponse, name="library")
 def library_page(request: Request, session: SessionDep, media_dir: MediaDirDep) -> HTMLResponse:
     folders = list_disc_folders(media_dir)
     purge_missing_folders(session, folders)
     views = [folder_view(session, media_dir, name, path) for name, path in folders.items()]
-    context = {"folders": views, "scanning": _scanning}
+    context = {"folders": views, "scanning": _scanning, "active": store.active_folders(session)}
     return templates.TemplateResponse(request, "library.html", context)
 
 
@@ -90,7 +42,14 @@ def folder_page(
 ) -> HTMLResponse:
     view = folder_view(session, media_dir, name, folder)
     # The body template is shared with the scan response: no scan result on a plain GET.
-    context = {"folder": view, "scan_error": None, "probed": None, "scanning": _scanning}
+    context = {
+        "folder": view,
+        "scan_error": None,
+        "probed": None,
+        "scanning": _scanning,
+        "dvd": dvd_state(session, view),
+        "now": datetime.now(UTC),
+    }
     return templates.TemplateResponse(request, "folder.html", context)
 
 
@@ -115,5 +74,12 @@ def scan(
             _scan_lock.release()
     view = folder_view(session, media_dir, name, folder)
     # Our own scan has finished here; a refused one shows the scan that is still running.
-    context = {"folder": view, "scan_error": error, "probed": probed, "scanning": _scanning}
+    context = {
+        "folder": view,
+        "scan_error": error,
+        "probed": probed,
+        "scanning": _scanning,
+        "dvd": dvd_state(session, view),
+        "now": datetime.now(UTC),
+    }
     return templates.TemplateResponse(request, "_folder_body.html", context)

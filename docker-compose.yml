@@ -6,9 +6,29 @@ services:
     ports:
       # Local only: the app has no authentication and can read the media drive.
       - "127.0.0.1:8000:8000"
+    environment:
+      # Only to show where the ISO is on Windows (C:\...); the app writes to /output.
+      HOST_OUTPUT_DIR: ${HOST_OUTPUT_DIR}
     # The host folders must exist before "up": if one is missing, Docker creates it owned
     # by root and the app (uid 1000) cannot write there. Docker Desktop ignores
     # create_host_path: false, so this is documented in .env.example instead.
+    volumes:
+      - ${HOST_MEDIA_DIR:?set HOST_MEDIA_DIR in .env}:/media:ro
+      - ${HOST_WORK_DIR:?set HOST_WORK_DIR in .env}:/work
+      - ${HOST_OUTPUT_DIR:?set HOST_OUTPUT_DIR in .env}:/output
+      - data:/data
+
+  worker:
+    build:
+      context: .
+      target: runtime
+    command: ["python", "-m", "projeto_dvd.jobs.worker"]
+    # Reaps ffmpeg if the worker dies; the worker stops its tool within 3 s on SIGTERM.
+    init: true
+    stop_grace_period: 30s
+    # The image healthcheck probes the web port; the worker has none.
+    healthcheck:
+      disable: true
     volumes:
       - ${HOST_MEDIA_DIR:?set HOST_MEDIA_DIR in .env}:/media:ro
       - ${HOST_WORK_DIR:?set HOST_WORK_DIR in .env}:/work

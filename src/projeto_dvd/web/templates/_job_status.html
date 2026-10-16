@@ -1,0 +1,89 @@
+{% set job = view.job %}
+<section id="job-status" class="job-status"
+  {% if view.active %}hx-get="{{ url_for('job_status', job_id=job.id) }}"
+  hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
+  {% set current = view.steps | selectattr("state", "equalto", "current") | first %}
+  {% if job.status == "queued" %}
+    {% if view.queue_ahead %}
+    <p class="banner" role="status">Na fila. Começa quando o job #{{ view.queue_ahead.id }} (pasta {{ view.queue_ahead.folder }}) terminar.</p>
+    {% elif view.waiting_worker %}
+    <p class="banner banner-warning" role="status">Aguardando o worker. Confira se o serviço está rodando
+      (<code>docker compose ps</code>); para subir: <code>docker compose up -d worker</code>.</p>
+    {% else %}
+    <p class="banner" role="status">Na fila.</p>
+    {% endif %}
+  {% elif job.status == "running" %}
+    <p class="progress-line"><progress max="100" value="{{ view.percent }}" aria-label="Progresso da geração"></progress>
+      <span class="numbers">{{ view.percent }}%</span></p>
+    {% if current %}<p role="status">Etapa atual: {{ current.label }}</p>{% endif %}
+    <p class="muted">Começou {{ view.started | ago(view.now) }} · faltam {{ view.remaining_seconds | remaining }}</p>
+    <p>Pode fechar esta página. A geração continua e você pode voltar pela lista de Jobs.</p>
+  {% elif job.status == "done" %}
+    <p class="banner banner-ok" role="status"><strong>Pronto! O ISO passou na conferência automática.</strong></p>
+    <p>O ISO está em: <code>{{ view.iso_display }}</code>{% if view.qa %} ({{ view.qa.iso_bytes | size }}){% endif %}.</p>
+    <h2>Antes de gravar, confira no VLC</h2>
+    <ol class="checklist">
+      <li>Abra o ISO no VLC (Mídia, Abrir disco, escolha o arquivo .iso).</li>
+      <li>O filme começa sozinho ao abrir o disco.</li>
+      <li>"Menu" e "Title" não travam nem tiram o filme do lugar.</li>
+      <li>Os capítulos pulam com "próximo".</li>
+      <li>Áudio e legenda trocam; a faixa e a legenda do início são as escolhidas.</li>
+      <li>Panorâmicas sem tranco nem pente; cores e faixas pretas corretas.</li>
+      <li>Legenda legível, em até 2 linhas.</li>
+      <li>Áudio sincronizado com a boca no começo, no meio e no fim.</li>
+      <li>No fim do filme o disco para, sem travar.</li>
+    </ol>
+    <h2>Gravar no Windows</h2>
+    <p>Abra o ImgBurn, escolha "Write image file to disc", selecione o ISO, use velocidade
+      baixa (4x ou 8x) e deixe marcado "Verify".</p>
+  {% elif job.status == "canceled" %}
+    <p class="banner" role="status">Cancelado por você. Nada foi gravado na pasta de saída.</p>
+  {% else %}
+    <p class="banner banner-error" role="status">{{ job.error or "A geração falhou." }}</p>
+  {% endif %}
+
+  {% if job.status != "done" %}
+  <ol class="steps">
+    {% for step in view.steps %}
+    <li class="step step-{{ step.state }}">{{ step.label }}</li>
+    {% endfor %}
+  </ol>
+  {% endif %}
+
+  {% if view.qa %}
+  {% set ok = view.qa.checks | selectattr("ok") | list | length %}
+  <details class="qa"{% if not view.qa.passed %} open{% endif %}>
+    <summary>Conferência automática: {{ ok }} de {{ view.qa.checks | length }} itens ok</summary>
+    <ul class="checks">
+      {% for check in view.qa.checks %}
+      <li class="{{ 'check-ok' if check.ok and not check.warning else 'check-warning' if check.ok else 'check-failed' }}">
+        {{ check.label }}{% if check.detail %} <span class="muted">({{ check.detail }})</span>{% endif %}</li>
+      {% endfor %}
+    </ul>
+  </details>
+  {% endif %}
+
+  <p class="actions">
+    {% if job.status == "running" and not view.canceling %}
+    <button class="button secondary" type="button"
+            hx-post="{{ url_for('cancel_job', job_id=job.id) }}" hx-target="#job-status"
+            hx-swap="outerHTML"
+            hx-confirm="Cancelar a geração? O que já foi feito se perde (ainda não dá para retomar).">Cancelar</button>
+    {% elif job.status == "queued" %}
+    <button class="button secondary" type="button"
+            hx-post="{{ url_for('cancel_job', job_id=job.id) }}" hx-target="#job-status"
+            hx-swap="outerHTML" hx-confirm="Tirar este job da fila?">Cancelar</button>
+    {% elif view.canceling %}
+    <span class="muted">Cancelando...</span>
+    {% endif %}
+    {% if job.status in ("failed", "canceled") %}
+    <a class="button secondary" href="{{ url_for('dvd_form', name=job.folder | urlencode) }}">Gerar de novo</a>
+    {% endif %}
+    {% if not view.active and view.temp_bytes >= 1000000 %}
+    <button class="button secondary" type="button"
+            hx-post="{{ url_for('clean_job', job_id=job.id) }}" hx-target="#job-status"
+            hx-swap="outerHTML"
+            hx-confirm="Apagar {{ view.temp_bytes | size }} de arquivos temporários deste job? O log fica.{% if job.status == 'done' %} O ISO na pasta de saída não é afetado.{% elif view.qa %} O ISO reprovado que ficou na pasta de trabalho também será apagado.{% endif %}">Apagar arquivos temporários ({{ view.temp_bytes | size }})</button>
+    {% endif %}
+  </p>
+</section>

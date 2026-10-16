@@ -13,6 +13,7 @@ TOOLS: dict[str, tuple[list[str], str]] = {
     "dvdauthor": (["dvdauthor", "--help"], r"dvdauthor, version (\d+(?:\.\d+)*)"),
     "spumux": (["spumux", "--help"], r"spumux, version (\d+(?:\.\d+)*)"),
     "xorriso": (["xorriso", "-version"], r"^xorriso (\d+(?:\.\d+)*)"),
+    "genisoimage": (["genisoimage", "--version"], r"genisoimage (\d+(?:\.\d+)*)"),
     "tsMuxeR": (["tsMuxeR", "--version"], r"tsMuxeR version (\d+(?:\.\d+)*)"),
 }
 

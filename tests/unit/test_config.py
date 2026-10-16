@@ -23,3 +23,12 @@ def test_environment_variables_override_the_defaults(monkeypatch: pytest.MonkeyP
 
     assert settings.media_dir == Path("/tmp/entrada")
     assert settings.database_url == "sqlite:////tmp/test.db"
+
+
+def test_work_and_output_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("WORK_DIR", raising=False)
+    monkeypatch.delenv("OUTPUT_DIR", raising=False)
+
+    settings = Settings()
+
+    assert (settings.work_dir, settings.output_dir) == (Path("/work"), Path("/output"))

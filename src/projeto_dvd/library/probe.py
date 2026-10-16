@@ -3,8 +3,9 @@
 import json
 import subprocess
 from dataclasses import dataclass
+from fractions import Fraction
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 TIMEOUT_SECONDS = 60
 ERROR_LIMIT = 500
@@ -16,20 +17,12 @@ HDR = "HDR (precisa de conversão para SDR)"
 DOLBY_VISION_5 = "Dolby Vision perfil 5 (conversão de cor a confirmar)"
 ABOVE_1080P = "Acima de 1080p"
 
-UNDEFINED_LANGUAGE = "não definido"
-
 HDR_TRANSFERS = frozenset({"smpte2084", "arib-std-b67"})
 DOVI_SIDE_DATA = "DOVI configuration record"
 TEXT_SUBTITLES = frozenset({"subrip", "ass", "ssa", "mov_text", "webvtt", "text"})
 IMAGE_SUBTITLES = frozenset({"hdmv_pgs_subtitle", "dvd_subtitle", "dvb_subtitle", "xsub"})
-CHANNEL_LAYOUTS = {
-    "mono": "mono",
-    "stereo": "estéreo",
-    "5.1": "5.1",
-    "5.1(side)": "5.1",
-    "7.1": "7.1",
-}
-CHANNEL_COUNTS = {1: "mono", 2: "estéreo", 6: "5.1", 8: "7.1"}
+
+SubtitleKind = Literal["text", "image", "unknown"]
 
 
 class FfprobeMissingError(Exception):
@@ -44,20 +37,30 @@ class ProbeResult:
 
 @dataclass(frozen=True)
 class Video:
+    index: int
     codec: str
     width: int
     height: int
     fps: float | None
+    r_frame_rate: Fraction | None
+    avg_frame_rate: Fraction | None
+    field_order: str | None  # "progressive", "tt", "bb", "tb", "bt" or None
     aspect: float | None
     hdr: bool
     dolby_vision_5: bool
+    start_time: float
 
 
 @dataclass(frozen=True)
 class AudioTrack:
-    language: str
-    channels: str
+    index: int
+    language: str | None  # as ffprobe gives it ("por"); None when missing or "und"
     codec: str
+    channel_count: int | None
+    channel_layout: str | None
+    sample_rate: int | None
+    bit_rate: int | None
+    start_time: float
     title: str | None
     default: bool
     forced: bool
@@ -65,8 +68,9 @@ class AudioTrack:
 
 @dataclass(frozen=True)
 class SubtitleTrack:
-    language: str
-    kind: str  # "texto", "imagem" or "desconhecido"
+    index: int
+    language: str | None
+    kind: SubtitleKind
     codec: str
     title: str | None
     default: bool
@@ -75,11 +79,13 @@ class SubtitleTrack:
 
 @dataclass(frozen=True)
 class Summary:
+    """Raw values for the planner; the screens translate them (api/formatting.py)."""
+
     duration: float | None
     video: Video | None
     audio: tuple[AudioTrack, ...]
     subtitles: tuple[SubtitleTrack, ...]
-    chapters: int
+    chapters: tuple[float, ...]  # start times in seconds
     warnings: tuple[str, ...]
 
 
@@ -125,7 +131,7 @@ def run_ffprobe(path: Path) -> ProbeResult:
 
 
 def summarize(data: dict[str, Any]) -> Summary:
-    """Summarize ffprobe JSON; missing or odd values become None or "?", never an error."""
+    """Summarize ffprobe JSON; missing or odd values become None, never an error."""
     streams: list[dict[str, Any]] = data.get("streams", [])
     video_streams = [
         s
@@ -138,7 +144,7 @@ def summarize(data: dict[str, Any]) -> Summary:
         video=video,
         audio=tuple(_audio(s) for s in streams if s.get("codec_type") == "audio"),
         subtitles=tuple(_subtitle(s) for s in streams if s.get("codec_type") == "subtitle"),
-        chapters=len(data.get("chapters", [])),
+        chapters=tuple(_float(c.get("start_time")) or 0.0 for c in data.get("chapters", [])),
         warnings=_warnings(video),
     )
 
@@ -151,14 +157,22 @@ def _video(stream: dict[str, Any]) -> Video:
         for side in stream.get("side_data_list", [])
         if side.get("side_data_type") == DOVI_SIDE_DATA
     ]
+    r_rate = _fraction(stream.get("r_frame_rate"))
+    avg_rate = _fraction(stream.get("avg_frame_rate"))
+    rate = avg_rate or r_rate
     return Video(
+        index=int(stream.get("index", 0)),
         codec=stream.get("codec_name", "?"),
         width=width,
         height=height,
-        fps=_ratio(stream.get("avg_frame_rate"), "/") or _ratio(stream.get("r_frame_rate"), "/"),
+        fps=float(rate) if rate else None,
+        r_frame_rate=r_rate,
+        avg_frame_rate=avg_rate,
+        field_order=stream.get("field_order"),
         aspect=_aspect(stream, width, height),
         hdr=stream.get("color_transfer") in HDR_TRANSFERS or bool(dovi),
         dolby_vision_5=any(side.get("dv_profile") == 5 for side in dovi),
+        start_time=_float(stream.get("start_time")) or 0.0,
     )
 
 
@@ -173,10 +187,16 @@ def _aspect(stream: dict[str, Any], width: int, height: int) -> float | None:
 
 
 def _audio(stream: dict[str, Any]) -> AudioTrack:
+    channels = stream.get("channels")
     return AudioTrack(
+        index=int(stream.get("index", 0)),
         language=_language(stream),
-        channels=_channels(stream),
         codec=stream.get("codec_name", "?"),
+        channel_count=channels if isinstance(channels, int) else None,
+        channel_layout=stream.get("channel_layout") or None,
+        sample_rate=_int(stream.get("sample_rate")),
+        bit_rate=_int(stream.get("bit_rate")),
+        start_time=_float(stream.get("start_time")) or 0.0,
         title=_tags(stream).get("title"),
         default=_disposition(stream, "default"),
         forced=_disposition(stream, "forced"),
@@ -185,13 +205,11 @@ def _audio(stream: dict[str, Any]) -> AudioTrack:
 
 def _subtitle(stream: dict[str, Any]) -> SubtitleTrack:
     codec = stream.get("codec_name", "?")
-    if codec in TEXT_SUBTITLES:
-        kind = "texto"
-    elif codec in IMAGE_SUBTITLES:
-        kind = "imagem"
-    else:
-        kind = "desconhecido"
+    kind: SubtitleKind = (
+        "text" if codec in TEXT_SUBTITLES else "image" if codec in IMAGE_SUBTITLES else "unknown"
+    )
     return SubtitleTrack(
+        index=int(stream.get("index", 0)),
         language=_language(stream),
         kind=kind,
         codec=codec,
@@ -214,19 +232,9 @@ def _warnings(video: Video | None) -> tuple[str, ...]:
     return tuple(warnings)
 
 
-def _channels(stream: dict[str, Any]) -> str:
-    layout: str | None = stream.get("channel_layout")
-    if layout:
-        return CHANNEL_LAYOUTS.get(layout, layout)
-    count = stream.get("channels")
-    if isinstance(count, int):
-        return CHANNEL_COUNTS.get(count, f"{count} canais")
-    return "?"
-
-
-def _language(stream: dict[str, Any]) -> str:
+def _language(stream: dict[str, Any]) -> str | None:
     language = _tags(stream).get("language")
-    return UNDEFINED_LANGUAGE if not language or language == "und" else language
+    return None if not language or language == "und" else language
 
 
 def _tags(stream: dict[str, Any]) -> dict[str, str]:
@@ -246,6 +254,23 @@ def _ratio(value: str | None, separator: str) -> float | None:
     except ValueError:
         return None
     return top / bottom if top and bottom else None
+
+
+def _fraction(value: str | None) -> Fraction | None:
+    """'24000/1001' as a Fraction; None for missing, zero or invalid values."""
+    numerator, _, denominator = (value or "").partition("/")
+    try:
+        result = Fraction(int(numerator), int(denominator))
+    except (ValueError, ZeroDivisionError):
+        return None
+    return result or None
+
+
+def _int(value: str | int | None) -> int | None:
+    try:
+        return int(value) if value is not None else None
+    except ValueError:
+        return None
 
 
 def _float(value: str | None) -> float | None:
