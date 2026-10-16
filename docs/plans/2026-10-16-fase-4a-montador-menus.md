@@ -29,7 +29,7 @@ dvdauthor 0.7.2, genisoimage; testes `slow` com libdvdnav via `ctypes`.
 - Textos da tela e do menu em português; limites: até 60 títulos, 4 idiomas de áudio, 4 de legenda.
 - Registradores do DVD só g0 a g12 (g14 e g15 são do dvdauthor); uma PGC com no máximo 128 comandos.
 - Menus: fundo em pixel quadrado (854x480 no 16:9, 640x480 no 4:3) reduzido para 720x480 com
-  Lanczos; subpicture desenhado direto em 720x480, no máximo 4 cores, alfa só 0 ou 255,
+  Lanczos; subpicture desenhado direto em 720x480, no máximo 4 cores, sem antialias (alfa só o da paleta),
   coordenadas pares, caixas com 4 px entre si.
 - Paleta: ambar `#E0A526`, vermelho `#D9483B`, azul `#4C9BE0`, verde `#3DB894`, lilas `#A685E0`,
   gelo `#E6E6E6`; texto `#EBEBEB`, secundário `#B4B4B4`, contorno `#101010`.
