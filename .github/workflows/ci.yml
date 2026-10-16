@@ -97,11 +97,13 @@ jobs:
             -metadata:s:a:0 language=por /gen/clip.mkv
           base=http://127.0.0.1:8000
           curl -fsS -X POST -H "Sec-Fetch-Site: same-origin" "$base/folders/Disco%20DVD/scan" -o /dev/null
-          curl -fsS "$base/folders/Disco%20DVD/dvd" | grep -q "Gerar DVD"
+          curl -fsS "$base/folders/Disco%20DVD/dvd" | grep -q "Montar DVD"
+          curl -fsS "$base/folders/Disco%20DVD/dvd/menu.png?page=0" | head -c 4 | grep -q "PNG"
           job="$(curl -fsS -o /dev/null -w '%{redirect_url}' -X POST \
             -H "Sec-Fetch-Site: same-origin" \
-            -d profile=dvd5 -d audio=1 -d first_audio=1 -d chapters=every -d minutes=5 \
-            -d subtitle_on= "$base/folders/Disco%20DVD/dvd")"
+            -d kind=movies --data-urlencode "order=Disco DVD/clip.mkv" -d profile=dvd5 \
+            -d audio=pt -d first_audio=pt -d chapters=every -d minutes=5 -d subtitle_on= \
+            -d backdrop= -d accent=auto -d side=left "$base/folders/Disco%20DVD/dvd")"
           echo "job: $job"
           test -n "$job"
           for _ in $(seq 90); do

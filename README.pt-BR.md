@@ -11,10 +11,10 @@ O objetivo é uma coleção física feita para durar: discos que seguem as espec
 de DVD-Video e BDMV à risca, para tocar num player comum daqui a 20 anos, com menus simples o
 bastante para uma criança ou um avô usarem só com o controle remoto.
 
-> **Status:** Fase 2 (curadoria) em cima da Fase 3 (DVD mínimo). Cada vídeo de uma pasta de
-> disco ganha o match no TMDB (filme ou episódio, dados em pt-BR e artes), e uma pasta com um
-> vídeo vira um ISO de DVD-Video sem menu, conferido automaticamente antes de chegar à pasta de
-> saída. O roadmap está no [`CLAUDE.md`](CLAUDE.md).
+> **Status:** Fase 4a (montador e menus de DVD). Cada vídeo de uma pasta de disco ganha o
+> match no TMDB (filme ou episódio, dados em pt-BR e artes), e a pasta inteira vira um ISO de
+> DVD-Video com menus (filmes, ou uma temporada com "Tocar todos"), conferido automaticamente
+> antes de chegar à pasta de saída. O roadmap está no [`CLAUDE.md`](CLAUDE.md).
 
 ## Pipeline planejado
 
@@ -76,44 +76,68 @@ app procura no [TMDB](https://www.themoviedb.org/) e o Vini confirma.
    `metadata.json` (episódios: `S01E03.jpg` e `S01E03.json` na pasta da série). A escolha entre
    várias imagens chega com as capas.
 
-O formulário "Gerar DVD" passa a sugerir o áudio no idioma original informado pelo TMDB.
+A tela "Montar DVD" usa os nomes do TMDB no menu, o fundo como arte do menu e o idioma
+original para sugerir o áudio.
 
 <img src="src/projeto_dvd/web/static/tmdb.svg" alt="TMDB" height="14">
 Este produto usa a API do TMDB, mas não é endossado nem certificado pelo TMDB ("This product
 uses the TMDB API but is not endorsed or certified by TMDB."). Os dados e as imagens são usados
 para fins pessoais e não comerciais (imprimir as capas da própria coleção).
 
-## Gerando um DVD
+## Montando um DVD
 
-1. Coloque um vídeo numa pasta de disco, abra a pasta no app e clique em **Escanear**.
-2. Clique em **Gerar DVD**. O formulário já vem com tudo sugerido; mude o que quiser:
-   - **Áudio:** as faixas em português e no idioma original vêm marcadas; escolha a que toca
-     ao colocar o disco. AC-3 compatível é copiado sem perda; o resto (DTS, TrueHD, AAC...)
-     vira AC-3, sem inventar canais.
-   - **Legendas:** legendas de texto (um `.srt` ao lado do vídeo, ou uma faixa de texto dentro
-     do MKV) viram legendas de DVD; escolha uma para começar ligada, ou nenhuma.
-   - **Capítulos:** os do arquivo, ou a cada N minutos (no máximo 99).
-   - **Disco:** DVD-5 (camada única, 4,7 GB) ou DVD-9 (dupla camada, 8,5 GB); cada cartão mostra
-     o tamanho e a qualidade da imagem: "Ótima" (5 Mbps ou mais), "Aceitável" (3,5 a 5),
-     "Baixa" (abaixo de 3,5, pede confirmação) ou "Não cabe".
-3. A tela do job mostra cada etapa, o progresso e o tempo que falta; dá para fechar e voltar
-   por **Jobs**. Um filme de 2 h em 1080p leva de 20 a 30 minutos num processador de 6 núcleos.
-4. O ISO é conferido automaticamente (tamanho, estrutura VIDEO_TS, faixas e idiomas,
-   capítulos, ordem dos campos, sincronia do áudio, decodificação completa). Só um ISO
-   aprovado é copiado para `HOST_OUTPUT_DIR\iso\<pasta>.iso` (a tela do job mostra o caminho
-   completo no Windows); um reprovado fica na pasta de trabalho, com o motivo.
+![Uma página do menu como a TV mostra](docs/images/menu-preview.png)
+
+1. Coloque os vídeos de um disco numa pasta (três filmes, ou os episódios de uma temporada),
+   abra a pasta no app e clique em **Escanear**.
+2. Clique em **Montar DVD**. A tela já vem com tudo sugerido e salva cada mudança:
+   - **Títulos:** filmes ou série, na ordem do disco (suba e desça cada um). Os nomes vêm do
+     TMDB quando o match está confirmado, ou do nome do arquivo.
+   - **Idiomas, para o disco todo:** os idiomas de áudio e de legenda, o áudio que toca
+     primeiro e a legenda que começa ligada. Cada título usa a melhor faixa de cada idioma; o
+     título que não tem um deles aparece na lista (toca a própria primeira faixa, ou fica sem
+     legenda). AC-3 compatível é copiado sem perda; o resto vira AC-3, sem inventar canais.
+     Legendas de texto (`.srt` ou faixa de texto do MKV) viram legendas de DVD.
+   - **Menu:** o preview de cada página, com o fundo (do TMDB ou escuro), a cor de destaque
+     (de uma paleta fechada, ou tirada do fundo) e o lado dos botões.
+   - **Capítulos:** os do arquivo, ou a cada N minutos (no máximo 99 por título).
+   - **Disco:** DVD-5 ou DVD-9; cada cartão mostra o tamanho e a qualidade da imagem do disco
+     inteiro ("Ótima", "Aceitável", "Baixa" pede confirmação, "Não cabe"). Todos os títulos
+     usam o mesmo bitrate de vídeo, então a qualidade é a mesma do primeiro ao último.
+3. A tela do job mostra as etapas do título atual, o progresso e o tempo que falta; dá para
+   fechar e voltar por **Jobs**.
+4. O ISO é conferido automaticamente (tamanho, estrutura VIDEO_TS e, em cada título e página
+   de menu, faixas, idiomas, capítulos, ordem dos campos, sincronia e decodificação completa).
+   Só um ISO aprovado é copiado para `HOST_OUTPUT_DIR\iso\<pasta>.iso`.
 5. Teste o ISO no VLC (Mídia, Abrir disco) com o checklist da tela do job e grave no Windows
    com o ImgBurn ("Write image file to disc", velocidade baixa, verificar).
 
-Como funciona, em resumo: MPEG-2 em 2 passes (nunca `-target ntsc-dvd`, que duplica quadros);
-filmes em 23,976 recebem **soft pulldown** por um pequeno patcher que edita o arquivo no lugar
-(o player mostra 29,97 sem tranco); fontes 480i continuam entrelaçadas; rips de DVD são
-classificados pelos quadros; o `dvdauthor` monta um título que começa sozinho e o
-`genisoimage -dvd-video -udf` gera o ISO.
+**No disco:** ao colocar, abre o menu principal. Um disco de filmes lista os filmes (mais de
+seis ganham páginas próprias); um disco de série tem "Tocar todos", as páginas de episódios
+(um episódio escolhido segue até o fim do disco) e as páginas de idioma. "Áudio" e "Legendas"
+são páginas próprias, com um ✓ no idioma ligado. O filme volta à própria página e ao próprio
+botão; as teclas Menu e Title do controle sempre voltam ao menu principal.
+
+Como funciona, em resumo:
+
+- **Vídeo:** MPEG-2 em 2 passes (nunca `-target ntsc-dvd`, que duplica quadros); filmes em
+  23,976 recebem **soft pulldown** por um pequeno patcher que edita o arquivo no lugar; fontes
+  480i continuam entrelaçadas; rips de DVD são classificados pelos quadros.
+- **Menus:** desenhados com o Pillow em pixels quadrados e reduzidos para 720x480; o destaque
+  dos botões é um subpicture de 4 cores desenhado direto em 720x480 (sem antialias). Um menu
+  16:9 tem uma segunda camada de botões para a TV 4:3 que mostra o menu com faixas pretas. Cada
+  página é um segundo de MPEG-2 parado com AC-3 silencioso.
+- **Navegação:** `dvdauthor` com um titleset por título (cada um declara exatamente as próprias
+  faixas) e todo pulo passando pelo VMGM, onde duas PGCs só de comandos despacham o próximo
+  título e a página a mostrar. Os GPRMs guardam os idiomas, o próximo episódio e o botão
+  destacado. Um disco aceita até 60 títulos (o despachante cabe nos 128 comandos de uma PGC).
+- **ISO:** `genisoimage -dvd-video -udf`.
+- **Testes:** os testes lentos montam discos de verdade e navegam neles com a libdvdnav, a
+  biblioteca de navegação do VLC (o player físico continua sendo o teste final).
 
 **Ainda não suportado** (a tela explica o motivo): HDR e 4K, PAL/25 fps, 24 fps exato, 29,97
 progressivo, 59,94, taxa de quadros variável, 1080i, legendas em imagem (PGS, VobSub) e estilo
-ASS, menus e vários títulos por disco. Para um filme cuja legenda em português é imagem,
+ASS, menu de capítulos e menu com vídeo. Para um filme cuja legenda em português é imagem,
 coloque um `.srt` ao lado dele.
 
 A pasta de trabalho precisa de **cerca de 2 vezes o tamanho do disco** livre (uns 18 GB para um
@@ -124,6 +148,7 @@ arquivos temporários**, na tela do job, remove o que sobrar.
 
 - Python 3.12, FastAPI, Jinja2, HTMX e um CSS próprio pequeno (sem etapa de build)
 - httpx2 para a API do TMDB (e o `MockTransport` dele nos testes: eles nunca chamam o TMDB)
+- Pillow para as páginas do menu e o preview delas
 - SQLite (WAL) com SQLModel e Alembic; um processo worker separado roda os jobs
 - Ferramentas de mídia: ffmpeg, dvdauthor/spumux, genisoimage, tsMuxeR, xorriso
 - Docker e docker compose; CI no GitHub Actions
