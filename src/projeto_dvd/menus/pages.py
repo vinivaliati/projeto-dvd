@@ -6,8 +6,9 @@ mark, so the viewer sees which option is on.
 """
 
 from collections.abc import Sequence
+from typing import Literal
 
-from projeto_dvd.planner.disc_plan import Kind, MenuItem, MenuPage
+from projeto_dvd.planner.disc_plan import Action, Kind, MenuItem, MenuPage
 
 PAGE_SIZE = 6  # items of a normal list
 LARGE_MAIN = 4  # a main page with up to 4 items uses the large type
@@ -105,11 +106,13 @@ def _list_pages(kind: Kind, plays: list[MenuItem], heading: str) -> list[MenuPag
     return pages
 
 
-def _variant(kind: str, heading: str, labels: list[str], option: int) -> MenuPage:
-    action = "audio" if kind == "audio" else "subtitle"
+def _variant(
+    kind: Literal["audio", "subtitles"], heading: str, labels: list[str], option: int
+) -> MenuPage:
+    action: Action = "audio" if kind == "audio" else "subtitle"
     items = [MenuItem(label=label, action=action, target=n) for n, label in enumerate(labels)]
     return MenuPage(
-        kind="audio" if kind == "audio" else "subtitles", heading=heading,
+        kind=kind, heading=heading,
         items=(*items, BACK), checked=option, focus=option + 1,
         large=len(items) + 1 <= LARGE_MAX,
     )  # fmt: skip
