@@ -154,7 +154,7 @@ def _save(
         name, metadata = movie_label(info.title, info.year), "metadata.json"
     else:
         code = episode_code(details.episode.season_number, details.episode.episode_number)
-        name, metadata = details.show.name, f"{code}.json"
+        name, metadata = info.show or details.show.name, f"{code}.json"
     warnings: list[str] = []
     try:
         directory = art_dir(output_dir, folder, name)
@@ -205,7 +205,7 @@ def _label(details: Details) -> str:
     if details.kind == "movie":
         return movie_label(info.title, info.year)
     assert info.season is not None and info.episode is not None
-    return episode_label(details.show.name, info.season, info.episode, info.title)
+    return episode_label(info.show or details.show.name, info.season, info.episode, info.title)
 
 
 def _duration_warning(details: Details, duration: float | None) -> list[str]:

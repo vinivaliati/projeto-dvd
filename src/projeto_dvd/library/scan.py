@@ -74,7 +74,7 @@ def scan_folder(session: Session, media_dir: Path, name: str, folder: Path, prob
         row = row or MediaFile(folder=name, path=video.path, size=0, mtime_ns=0, scanned_at=_now())
         if row.title is not None and row.title.status == "confirmed" and not _unchanged(row, video):
             # MakeMKV repeats title_t00.mkv across discs: a new file needs a new look.
-            row.title.status, row.title.message = "suggested", CHANGED_FILE
+            row.title.status, row.title.message = "doubtful", CHANGED_FILE
         # The stat from before ffprobe: a file still being copied will look changed next time.
         row.size, row.mtime_ns = video.size, video.mtime_ns
         row.probe_json, row.error, row.scanned_at = result.json, result.error, _now()

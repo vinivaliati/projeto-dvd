@@ -1,13 +1,13 @@
 """What the screens, menus and covers show about a confirmed title. Pure."""
 
 import re
+from typing import Literal
 
 from pydantic import BaseModel
 
 from projeto_dvd.metadata.filename import Kind
 from projeto_dvd.metadata.tmdb_models import (
     Details,
-    Movie,
     TranslationData,
     Translations,
     year_of,
@@ -42,7 +42,7 @@ def title_info(details: Details) -> TitleInfo:
         return TitleInfo(
             kind="movie",
             tmdb_id=movie.id,
-            title=_movie_title(movie),
+            title=_localized(movie.title, movie.original_language, movie.translations, "title"),
             year=year_of(movie.release_date),
             overview=movie.overview or _english(movie.translations).overview,
             cast=[member.name for member in movie.credits.cast[:CAST]],
@@ -56,7 +56,7 @@ def title_info(details: Details) -> TitleInfo:
         kind="episode",
         tmdb_id=show.id,
         title=episode.name,
-        show=show.name,
+        show=_localized(show.name, show.original_language, show.translations, "name"),
         season=episode.season_number,
         episode=episode.episode_number,
         episode_end=details.episode_end.episode_number if details.episode_end else None,
@@ -82,14 +82,20 @@ def generic_episode_name(name: str) -> bool:
     return not name.strip() or bool(_GENERIC_EPISODE.fullmatch(name.strip()))
 
 
-def _movie_title(movie: Movie) -> str:
-    """TMDB falls back to the original title when there is no pt-BR one: prefer English then."""
-    if movie.original_language == "pt" or any(
-        t.iso_639_1 == "pt" and t.iso_3166_1 == "BR" and t.data.title
-        for t in movie.translations.translations
+def _localized(
+    value: str, original_language: str, translations: Translations, field: Literal["title", "name"]
+) -> str:
+    """TMDB falls back to the original when there is no pt-BR text: prefer English then."""
+
+    def text(data: TranslationData) -> str:
+        return data.title if field == "title" else data.name
+
+    if original_language == "pt" or any(
+        t.iso_639_1 == "pt" and t.iso_3166_1 == "BR" and text(t.data)
+        for t in translations.translations
     ):
-        return movie.title
-    return _english(movie.translations).title or movie.title
+        return value
+    return text(_english(translations)) or value
 
 
 def _english(translations: Translations) -> TranslationData:

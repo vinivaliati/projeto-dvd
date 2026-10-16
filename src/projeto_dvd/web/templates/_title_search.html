@@ -19,7 +19,8 @@
     <ul class="results">
       {% for result in results %}
       <li>
-        <button type="button" name="tmdb_id" value="{{ result.id }}"
+        {# The kind of this search, not the radio now: show and movie ids overlap on TMDB. #}
+        <button type="button" name="tmdb_id" value="{{ result.id }}" hx-vals='{{ {"kind": query.kind} | tojson }}'
                 hx-post="{{ url_for('choose_title', file_id=card.file_id) }}"
                 hx-target="closest li.title-card" hx-swap="outerHTML" hx-disabled-elt="this">
           {% if result.poster_path %}

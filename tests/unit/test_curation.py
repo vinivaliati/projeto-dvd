@@ -325,3 +325,19 @@ def test_file_without_probe_has_no_duration_checks(session: Session, tmp_path: P
                     tmdb({"/3/movie/101": MOVIE, **IMAGES}), tmp_path)  # fmt: skip
 
     assert title.message is None
+
+
+def test_episode_label_and_folder_use_the_english_show_name(
+    session: Session, tmp_path: Path
+) -> None:
+    row = add_file(session, "Amigos/S01E03.mkv", seconds=22 * 60)
+    assert row.id is not None
+    translations = {"translations": [
+        {"iso_639_1": "en", "iso_3166_1": "US", "data": {"name": "Forever Friends"}}]}  # fmt: skip
+    show = {**SHOW, "name": "영원한 친구", "original_language": "ko", "translations": translations}
+    routes: dict[str, object] = {"/3/tv/202": show, "/3/tv/202/season/1": season(), **IMAGES}
+
+    title = confirm(session, row.id, Choice("episode", 202, 1, 3), tmdb(routes), tmp_path)
+
+    assert title.label == "Forever Friends · S01E03 · O Polegar"
+    assert (tmp_path / "covers" / "Amigos" / "Forever Friends" / "S01E03.jpg").exists()

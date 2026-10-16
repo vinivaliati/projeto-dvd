@@ -648,7 +648,8 @@ _Atualizar ao fim de cada sessão._
   na hora; `title` 1 para 1 com `media_file`, cascade pelo ORM (sem `PRAGMA foreign_keys`, que
   apagaria os títulos num batch do Alembic).
 - 2026-10-16 (Fase 2): o purge da biblioteca não roda com a pasta de entrada ausente ou vazia (HD
-  desligado não apaga nenhum match); um arquivo que mudou volta de "confirmado" para "sugestão".
+  desligado não apaga nenhum match); um arquivo que mudou volta de "confirmado" para "Confira"
+  (pode ser outro filme com o mesmo nome; nunca reconfirmado em lote).
 - 2026-10-16 (Fase 2): artes padrão por título em `OUTPUT_DIR/covers/<pasta>/`, gravadas como
   `.part` e renomeadas; caminho de imagem validado, sem redirecionamento, só `image/*`, até 30 MB.
   Arte que falha não desfaz a confirmação. Escolha entre várias na Fase 5.

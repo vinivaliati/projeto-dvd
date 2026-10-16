@@ -365,8 +365,9 @@ def test_changed_file_unconfirms_title(session: Session, media: Path) -> None:
 
     session.refresh(row)
     assert row.title is not None
+    # "Confira", never confirmed in bulk: the new file may be another movie.
     assert (row.title.status, row.title.message, row.title.tmdb_id) == (
-        "suggested",
+        "doubtful",
         CHANGED_FILE,
         101,
     )

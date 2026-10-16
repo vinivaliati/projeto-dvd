@@ -267,3 +267,16 @@ def file_id_of(client: TestClient, path: str) -> int:
         row = session.exec(select(MediaFile).where(MediaFile.path == path)).one()
         assert row.id is not None
         return row.id
+
+
+def test_search_results_keep_the_kind_they_were_searched_with(client: TestClient) -> None:
+    ROUTES["/3/search/tv"] = search_page({"id": 202, "name": "Amigos de Sempre"})
+    try:
+        page = client.post(f"/files/{file_id(client)}/search", headers=SAME,
+                           data={"kind": "episode", "q": "Amigos", "season": "1",
+                                 "episode": "3"}).text  # fmt: skip
+    finally:
+        del ROUTES["/3/search/tv"]
+
+    # Changing the radio after the search must not send a show id as a movie id.
+    assert """hx-vals='{"kind": "episode"}'""" in page

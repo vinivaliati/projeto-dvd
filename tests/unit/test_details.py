@@ -82,3 +82,14 @@ def test_movie_without_any_translation_keeps_what_tmdb_sent() -> None:
     info = title_info(movie(title="The Magic Ring", translations={"translations": [other]}))
 
     assert info.title == "The Magic Ring"
+
+
+def test_show_without_portuguese_translation_uses_english() -> None:
+    translations = {"translations": [
+        {"iso_639_1": "en", "iso_3166_1": "US", "data": {"name": "Forever Friends"}}]}  # fmt: skip
+    show = Show.model_validate({**SHOW, "name": "영원한 친구", "original_language": "ko",
+                                "translations": translations})  # fmt: skip
+    details = EpisodeDetails(kind="episode", show=show,
+                             episode=Season.model_validate(season()).episodes[2])  # fmt: skip
+
+    assert title_info(details).show == "Forever Friends"
