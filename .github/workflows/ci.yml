@@ -98,7 +98,8 @@ jobs:
           base=http://127.0.0.1:8000
           curl -fsS -X POST -H "Sec-Fetch-Site: same-origin" "$base/folders/Disco%20DVD/scan" -o /dev/null
           curl -fsS "$base/folders/Disco%20DVD/dvd" | grep -q "Montar DVD"
-          curl -fsS "$base/folders/Disco%20DVD/dvd/menu.png?page=0" | head -c 4 | grep -q "PNG"
+          curl -fsS "$base/folders/Disco%20DVD/dvd/menu.png?page=0" -o menu.png
+          head -c 4 menu.png | grep -q "PNG"
           job="$(curl -fsS -o /dev/null -w '%{redirect_url}' -X POST \
             -H "Sec-Fetch-Site: same-origin" \
             -d kind=movies --data-urlencode "order=Disco DVD/clip.mkv" -d profile=dvd5 \
