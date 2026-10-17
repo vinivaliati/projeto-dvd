@@ -74,12 +74,14 @@ def edges_px(xs: Sequence[float], dpi: int) -> list[int]:
     return [px(x, dpi) for x in xs]
 
 
-def fit_spine(text: str, length_mm: float, measure_mm: Measure) -> tuple[str, float]:
-    """The name on the spine: from 18 pt down to 12 pt, then cut with an ellipsis."""
-    for size in SPINE_SIZES:
+def fit_spine(
+    text: str, length_mm: float, measure_mm: Measure, sizes: Sequence[float] = SPINE_SIZES
+) -> tuple[str, float]:
+    """One line of text: the largest size that fits (18 to 12 pt on the spine), then an ellipsis."""
+    for size in sizes:
         if measure_mm(text, size) <= length_mm:
             return text, size
-    size = SPINE_SIZES[-1]
+    size = sizes[-1]
     cut = text
     while cut and measure_mm(cut.rstrip() + ELLIPSIS, size) > length_mm:
         cut = cut[:-1]

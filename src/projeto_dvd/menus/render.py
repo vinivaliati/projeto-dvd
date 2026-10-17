@@ -60,7 +60,7 @@ def background(
     fonts: Fonts,
 ) -> Image.Image:
     size = (layout.width, HEIGHT)
-    canvas = _neutral(size, accent, side) if backdrop is None else _art(backdrop, layout, side)
+    canvas = neutral(size, accent, side) if backdrop is None else _art(backdrop, layout, side)
     draw = ImageDraw.Draw(canvas)
     _draw_heading(draw, page, layout, accent, fonts, neutral=backdrop is None)
     for button in layout.buttons:
@@ -120,7 +120,7 @@ def preview(plan: MenuPlan, index: int, fonts: Fonts | None = None) -> bytes:
 
 def _art(backdrop: Image.Image, layout: PageLayout, side: str) -> Image.Image:
     width = layout.width
-    art = _cover(backdrop.convert("RGB"), (width, HEIGHT))
+    art = cover_crop(backdrop.convert("RGB"), (width, HEIGHT))
     art = ImageEnhance.Color(ImageEnhance.Brightness(art).enhance(DIM)).enhance(DIM)
     blurred = art.filter(ImageFilter.GaussianBlur(BLUR_RADIUS))
     left, right = layout.column
@@ -143,7 +143,7 @@ def _gradient(width: int, left: int, right: int, side: str, alpha: float) -> Ima
     return line.resize((width, HEIGHT), Image.Resampling.NEAREST)
 
 
-def _neutral(size: tuple[int, int], accent: str, side: str) -> Image.Image:
+def neutral(size: tuple[int, int], accent: str, side: str) -> Image.Image:
     """Diagonal gradient, a faint glow of the accent in the far corner, and a little noise."""
     width, height = size
     corners = Image.new("RGB", (2, 2))
@@ -186,7 +186,7 @@ def _draw_heading(
         draw.rectangle((layout.text_x, 120, layout.text_x + 119, 123), fill=accent)
 
 
-def _cover(image: Image.Image, size: tuple[int, int]) -> Image.Image:
+def cover_crop(image: Image.Image, size: tuple[int, int]) -> Image.Image:
     width, height = size
     scale = max(width / image.width, height / image.height)
     resized = image.resize((round(image.width * scale), round(image.height * scale)),
