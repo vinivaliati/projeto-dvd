@@ -298,7 +298,7 @@ def test_the_worker_passes_the_cache_and_notes_the_start(
     make_worker(engine, settings).run_once()
 
     use = calls[0]["cache"]
-    assert (use.work_dir, use.limit_bytes, use.ffmpeg) == (settings.work_dir, 50 * 1024**3, "7.1")
+    assert (use.work_dir, use.limit_bytes, use.ffmpeg) == (settings.work_dir, 50 * 10**9, "7.1")
     log = (settings.work_dir / "jobs" / str(job_id) / "job.log").read_text()
     assert "[projeto-dvd] Início em " in log
 

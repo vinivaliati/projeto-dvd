@@ -2,6 +2,11 @@
 {% block title %}Jobs{% endblock %}
 {% block content %}
 <h1>Jobs</h1>
+<form class="cache-line" method="post" action="{{ url_for('clean_cache') }}"
+      onsubmit="return confirm('Apagar o vídeo guardado ({{ cache_bytes | size }})? Os próximos discos codificam tudo de novo.')">
+  <span class="muted">Cache de vídeo: {{ cache_bytes | size }} de {{ cache_limit }} GB</span>
+  {% if cache_bytes %}<button class="button small secondary" type="submit">Limpar cache</button>{% endif %}
+</form>
 {% if jobs %}
 <div class="table-wrap">
 <table class="files">

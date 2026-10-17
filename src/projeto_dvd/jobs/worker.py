@@ -22,7 +22,6 @@ from projeto_dvd.config import Settings
 from projeto_dvd.db.session import is_migrated, make_engine
 from projeto_dvd.jobs import cache, store
 from projeto_dvd.jobs.pipeline import (
-    GIB,
     CacheUse,
     PipelineError,
     QaFailed,
@@ -117,7 +116,7 @@ class Worker:
     def cache_use(self) -> CacheUse:
         return CacheUse(
             work_dir=self.settings.work_dir,
-            limit_bytes=int(self.settings.cache_limit_gb * GIB),
+            limit_bytes=int(self.settings.cache_limit_gb * 10**9),  # decimal, like the screens
             ffmpeg=detect_versions().get("ffmpeg"),
         )
 

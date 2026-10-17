@@ -1,11 +1,11 @@
 """Job pages: progress while it runs, the result, the log, cancel and cleanup."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from sqlmodel import Session
 
 from projeto_dvd.api.deps import EngineDep, SessionDep, SettingsDep, templates
@@ -13,9 +13,9 @@ from projeto_dvd.api.formatting import windows_path
 from projeto_dvd.authoring.dvd.qa import QaReport
 from projeto_dvd.config import Settings
 from projeto_dvd.db.models import Job
-from projeto_dvd.jobs import store
+from projeto_dvd.jobs import cache, store
 from projeto_dvd.jobs.files import clean_job_dir, log_tail, temporary_bytes
-from projeto_dvd.jobs.pipeline import DISC_STEPS, STEP_LABELS, TITLE_STEPS, Step
+from projeto_dvd.jobs.pipeline import DISC_STEPS, STEP_LABELS, TITLE_STEPS, Step, preflight
 from projeto_dvd.jobs.store import ACTIVE, JobStatus
 from projeto_dvd.planner.disc_plan import DiscPlan, TitlePlan
 from projeto_dvd.planner.profiles import PROFILES
@@ -50,6 +50,8 @@ class JobView:
     temp_bytes: int
     iso_display: str
     now: datetime
+    can_resume: bool
+    resume_errors: tuple[str, ...] = ()
 
 
 def job_view(session: Session, settings: Settings, job: Job, now: datetime) -> JobView:
@@ -75,14 +77,18 @@ def job_view(session: Session, settings: Settings, job: Job, now: datetime) -> J
         qa=QaReport.model_validate_json(job.qa_json) if job.qa_json else None,
         temp_bytes=0 if job.status in ACTIVE else temporary_bytes(settings.work_dir, job.id),
         iso_display=_iso_display(settings, plan.iso_name),
-        now=now,
+        now=now, can_resume=_can_resume(session, job, plan),
     )  # fmt: skip
 
 
 @router.get("/jobs", response_class=HTMLResponse, name="jobs")
-def jobs_page(request: Request, session: SessionDep) -> HTMLResponse:
+def jobs_page(request: Request, session: SessionDep, settings: SettingsDep) -> HTMLResponse:
     jobs = [(job, DiscPlan.model_validate_json(job.plan_json)) for job in store.list_jobs(session)]
-    context = {"jobs": jobs, "profiles": PROFILES, "now": _now()}
+    context = {
+        "jobs": jobs, "profiles": PROFILES, "now": _now(),
+        "cache_bytes": cache.cache_bytes(settings.work_dir),
+        "cache_limit": f"{settings.cache_limit_gb:g}".replace(".", ","),
+    }  # fmt: skip
     return templates.TemplateResponse(request, "jobs.html", context)
 
 
@@ -124,6 +130,49 @@ def clean_job(request: Request, job_id: int, session: SessionDep,
         raise HTTPException(status_code=409)
     clean_job_dir(settings.work_dir, job_id)
     return job_status(request, job_id, session, settings)
+
+
+@router.post("/jobs/{job_id}/resume", response_class=HTMLResponse, name="resume_job")
+def resume_job(request: Request, job_id: int, session: SessionDep, settings: SettingsDep,
+               engine: EngineDep) -> HTMLResponse:  # fmt: skip
+    """The same plan back in the queue; the cache skips the titles already encoded."""
+    job = _job(session, job_id)
+    plan = DiscPlan.model_validate_json(job.plan_json)
+    if not _can_resume(session, job, plan):
+        raise HTTPException(status_code=409)
+    errors = preflight(settings.work_dir, settings.output_dir, plan.estimated_bytes,
+                       plan.iso_name, plan.replace_existing,
+                       cache_on=settings.cache_limit_gb > 0)  # fmt: skip
+    if errors:
+        view = replace(job_view(session, settings, job, _now()), resume_errors=tuple(errors))
+        return templates.TemplateResponse(request, "_job_status.html", {"view": view})
+    # Before the update, never after: once queued, the worker may already own the folder.
+    clean_job_dir(settings.work_dir, job_id)
+    try:
+        resumed = store.resume(engine, job_id)
+    except store.ActiveJobError as error:
+        link = f'<a href="/jobs/{error.job_id}">job #{error.job_id}</a>'
+        message = f"Esta pasta já tem um job ativo: {link}."
+        return HTMLResponse(f'<p class="banner banner-error" role="alert">{message}</p>')
+    if not resumed:
+        raise HTTPException(status_code=409)
+    session.expire_all()
+    return job_status(request, job_id, session, settings)
+
+
+@router.post("/cache/clean", name="clean_cache")
+def clean_cache(request: Request, session: SessionDep, settings: SettingsDep) -> Response:
+    if store.active_folders(session):
+        raise HTTPException(status_code=409)
+    cache.clean(settings.work_dir)
+    return RedirectResponse(request.url_for("jobs").path, status_code=303)
+
+
+def _can_resume(session: Session, job: Job, plan: DiscPlan) -> bool:
+    if job.status not in (JobStatus.FAILED, JobStatus.CANCELED) or plan.menu is None:
+        return False
+    latest = store.latest_job(session, job.folder)
+    return latest is not None and latest.id == job.id
 
 
 def _job(session: Session, job_id: int) -> Job:
