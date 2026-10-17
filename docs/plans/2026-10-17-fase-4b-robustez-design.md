@@ -4,7 +4,7 @@
 - **Branch:** `feat/fase-4b-robustez`
 - **Status:** desenho aprovado pelo Vini no chat; revisada por `tech-lead-midia` (com testes na
   imagem: cópia do vídeo de ponta a ponta, GOP aberto em fronteira de célula, sequence headers,
-  underflow do mux) e `revisor-codigo`, achados incorporados; aguardando a revisão do Vini.
+  underflow do mux) e `revisor-codigo`, achados incorporados; aprovada pelo Vini.
 
 ## Contexto e intenção
 
