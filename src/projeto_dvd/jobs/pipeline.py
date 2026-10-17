@@ -6,6 +6,7 @@ about twice the disc size. The ISO reaches the output folder only after the auto
 """
 
 import argparse
+import hashlib
 import json
 import os
 import shutil
@@ -13,7 +14,7 @@ import sys
 import tempfile
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
@@ -21,7 +22,7 @@ from pathlib import Path
 from sqlmodel import Session
 
 from projeto_dvd.api.formatting import format_size
-from projeto_dvd.authoring.dvd.dvdauthor import disc_xml, dvdauthor_command
+from projeto_dvd.authoring.dvd.dvdauthor import chapters_on_closed_gops, disc_xml, dvdauthor_command
 from projeto_dvd.authoring.dvd.menus import (
     menu_video_command,
     page_file,
@@ -37,9 +38,12 @@ from projeto_dvd.authoring.dvd.mux import (
     parse_first_pts,
 )
 from projeto_dvd.authoring.dvd.qa import (
+    ASPECT_CODES,
+    MAX_GOP_FIELDS,
     Check,
     QaReport,
     bitstream_checks,
+    copied_checks,
     decode_check,
     decode_command,
     dvd_probe_command,
@@ -68,8 +72,14 @@ from projeto_dvd.authoring.dvd.subtitles import (
 from projeto_dvd.config import Settings
 from projeto_dvd.db.session import make_engine, migrate
 from projeto_dvd.encode.audio import audio_command
-from projeto_dvd.encode.mpeg2 import PulldownError, apply_soft_pulldown, inspect_stream
-from projeto_dvd.encode.video import m2v_path, video_pass_command
+from projeto_dvd.encode.mpeg2 import (
+    NTSC_RATE_CODE,
+    PulldownError,
+    StreamReport,
+    apply_soft_pulldown,
+    inspect_stream,
+)
+from projeto_dvd.encode.video import copy_command, m2v_path, video_pass_command
 from projeto_dvd.jobs import cache as jobs_cache
 from projeto_dvd.jobs.cache import cache_key, plan_keys
 from projeto_dvd.jobs.files import cannot_write
@@ -85,6 +95,7 @@ from projeto_dvd.planner.dvd_plan import SubtitleChoice
 from projeto_dvd.planner.source import VideoMode
 
 COPY_CHUNK = 16 * 1024 * 1024
+COPY_SIZE_SLACK = 1.01  # the copied video may be 1% above the size in the plan
 GIB = 1024**3
 FIRST_PAGE_PGC = 4  # VMGM menu PGCs 1 to 3 are the dispatchers
 SOURCE_CHANGED = (
@@ -100,10 +111,20 @@ NO_SPACE_OUTPUT = "Acabou o espaço na pasta de saída ao copiar o ISO."
 ISO_EXISTS = (
     "Já existe um ISO com este nome na pasta de saída, e a substituição não foi confirmada."
 )
+COPY_REFUSED = (
+    "O vídeo do rip {name} não segue o padrão do DVD ({reason}). Marque Recodificar os rips e "
+    "gere de novo."
+)
+COPY_GREW = "O rip {name} mudou desde o plano; abra o Montar DVD de novo."
+COPY_UNDERFLOW = (
+    "O vídeo copiado do rip não cabe no fluxo do DVD com estas faixas. Tire uma faixa de áudio "
+    "ou marque Recodificar os rips."
+)
 ISO_EXISTS_FORM = 'Já existe um ISO com este nome. Marque "Substituir o ISO existente".'
 
 
 class Step(StrEnum):
+    VIDEO_COPY = "video_copy"
     VIDEO_PASS1 = "video_pass1"
     VIDEO_PASS2 = "video_pass2"
     PULLDOWN = "pulldown"
@@ -117,10 +138,11 @@ class Step(StrEnum):
     COPY = "copy"
 
 
-TITLE_STEPS = (Step.VIDEO_PASS1, Step.VIDEO_PASS2, Step.PULLDOWN, Step.AUDIO, Step.MUX,
-               Step.SUBTITLES)  # fmt: skip
+TITLE_STEPS = (Step.VIDEO_COPY, Step.VIDEO_PASS1, Step.VIDEO_PASS2, Step.PULLDOWN, Step.AUDIO,
+               Step.MUX, Step.SUBTITLES)  # fmt: skip
 DISC_STEPS = (Step.MENUS, Step.AUTHOR, Step.ISO, Step.QA, Step.COPY)
 STEP_LABELS = {
+    Step.VIDEO_COPY: "Vídeo copiado do DVD",
     Step.VIDEO_PASS1: "Vídeo: 1ª passada (análise)",
     Step.VIDEO_PASS2: "Vídeo: 2ª passada (codificação)",
     Step.PULLDOWN: "Ajuste de quadros para TV",
@@ -134,6 +156,7 @@ STEP_LABELS = {
     Step.COPY: "Copiando o ISO para a pasta de saída",
 }
 STEP_WEIGHTS = {
+    Step.VIDEO_COPY: 0,  # minutes against hours: the copied title barely moves the bar
     Step.VIDEO_PASS1: 35, Step.VIDEO_PASS2: 45, Step.PULLDOWN: 2, Step.AUDIO: 5,
     Step.MUX: 4, Step.SUBTITLES: 2, Step.MENUS: 1, Step.AUTHOR: 2, Step.ISO: 2, Step.QA: 3,
     Step.COPY: 2,
@@ -188,6 +211,10 @@ class TitleResult:
     pass2: RunResult
     mux: RunResult
     sync: Check
+    # A copied DVD video: the chapters moved to closed GOPs, the source stream and its hash.
+    chapters: tuple[float, ...] | None = None
+    source_report: StreamReport | None = None
+    sha256: str | None = None
 
 
 def step_text(step: Step, title: int) -> str:
@@ -252,7 +279,8 @@ def run_pipeline(
         progress((index + 1) / len(menu.pages))
     begin(Step.AUTHOR)
     xml = job_dir / "dvd.xml"
-    xml.write_text(disc_xml(plan, job_dir), encoding="utf-8")
+    moved = {n: r.chapters for n, r in enumerate(results, 1) if r.chapters is not None}
+    xml.write_text(disc_xml(plan, job_dir, moved), encoding="utf-8")
     shutil.rmtree(job_dir / "dvd", ignore_errors=True)  # dvdauthor appends to what exists
     with _tool_step(Step.AUTHOR):
         author = tools.run(dvdauthor_command(xml))
@@ -304,6 +332,10 @@ def _encode_title(
     m2v = m2v_path(job_dir, number)
     # A video left by a job that hit the cache is a hard link to it: never write through it.
     m2v.unlink(missing_ok=True)
+    if title.copy_video:
+        run, chapters, report, digest = _copy_video(title, number, source, job_dir, tools, begin)
+        result = _finish_title(plan, number, source, media_dir, job_dir, tools, begin, run)
+        return replace(result, chapters=chapters, source_report=report, sha256=digest)
     key = cache_key(plan, number, cache.ffmpeg) if cache else ""
     cached = jobs_cache.lookup(cache.work_dir, key, m2v) if cache else None
     if cached is not None:
@@ -349,6 +381,54 @@ def _encode_video(
     return pass2
 
 
+def _copy_video(
+    title: TitlePlan,
+    number: int,
+    source: Path,
+    job_dir: Path,
+    tools: Tools,
+    begin: Callable[[Step, int], Callable[[float], None]],
+) -> tuple[RunResult, tuple[float, ...], StreamReport, str]:
+    """The video of a DVD rip as it is, checked against the standard before anything else."""
+    m2v = m2v_path(job_dir, number)
+    progress = begin(Step.VIDEO_COPY, number)
+    with _tool_step(Step.VIDEO_COPY):
+        run = tools.run(copy_command(source, title.video_index, m2v), duration=title.duration,
+                        on_progress=progress)  # fmt: skip
+    report = inspect_stream(m2v)
+    reason = _copy_problem(report, title.aspect)
+    if reason:
+        raise PipelineError(COPY_REFUSED.format(name=source.name, reason=reason), Step.VIDEO_COPY)
+    if m2v.stat().st_size > (title.video_bytes or 0) * COPY_SIZE_SLACK:
+        raise PipelineError(COPY_GREW.format(name=source.name), Step.VIDEO_COPY)
+    chapters, dropped = chapters_on_closed_gops(title.chapters, report.gops)
+    for chapter in dropped:
+        _note(job_dir, f"Título {number}: capítulo em {chapter} s saiu (sem GOP fechado perto).")
+    return run, chapters, report, _sha256(m2v)
+
+
+def _copy_problem(report: StreamReport, aspect: str) -> str | None:
+    if report.frame_rate_codes != {NTSC_RATE_CODE} or report.progressive_sequence != {0}:
+        return "não é NTSC 29,97 entrelaçado"
+    if report.aspect_codes != {ASPECT_CODES[aspect]}:
+        return "o aspecto muda ou não é o esperado"
+    if not report.headers_every_gop:
+        return "falta sequence header antes de cada GOP"
+    if not report.first_gop_closed:
+        return "o primeiro GOP é aberto"
+    if report.max_gop_fields > MAX_GOP_FIELDS:
+        return f"GOP de {report.max_gop_fields} campos, o limite é {MAX_GOP_FIELDS}"
+    return None
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as file:
+        while chunk := file.read(COPY_CHUNK):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def _keep(
     plan: DiscPlan, number: int, key: str, m2v: Path, pass2: RunResult, job_dir: Path,
     cache: CacheUse,
@@ -386,6 +466,8 @@ def _finish_title(
         mux = tools.run(mux_command(title, job_dir, number, first_pts), duration=title.duration,
                         on_progress=progress)  # fmt: skip
         sync = sync_check(json.loads(tools.capture(sync_probe_command(movie))), title)
+    if title.copy_video and "buffer underflow" in mux.stderr:
+        raise PipelineError(COPY_UNDERFLOW, Step.MUX)
     m2v.unlink()
     for track in range(1, len(title.audio) + 1):
         audio_path(job_dir, number, track).unlink()
@@ -442,7 +524,14 @@ def _title_checks(
     extracted = job_dir / "qa.m2v"
     try:
         tools.run(extract_video_command(iso, extracted, number))
-        checks += bitstream_checks(inspect_stream(extracted), title.aspect)
+        report = inspect_stream(extracted)
+        if result.source_report is not None:  # copied video
+            same = _sha256(extracted) == result.sha256
+            chapters = result.chapters or title.chapters
+            checks += bitstream_checks(report, title.aspect)[:1]
+            checks += copied_checks(report, result.source_report, same, chapters)
+        else:
+            checks += bitstream_checks(report, title.aspect)
     finally:
         extracted.unlink(missing_ok=True)
     checks += [result.sync, encode_check(result.pass2, result.mux, author)]

@@ -235,3 +235,35 @@ def test_menu_checks() -> None:
 def test_prefixed_checks_tell_titles_apart() -> None:
     checks = qa.prefixed([qa.Check(name="video", label="Vídeo", ok=True)], "t2", "Título 2")
     assert (checks[0].name, checks[0].label) == ("t2-video", "Título 2: Vídeo")
+
+
+def copied(**fields: Any) -> StreamReport:
+    base = report(max_gop_fields=30, gops=[(0.0, True), (5.0, True)])
+    for key, value in fields.items():
+        setattr(base, key, value)
+    return base
+
+
+def test_a_copied_title_passes_when_the_video_is_the_same() -> None:
+    checks = qa.copied_checks(copied(), copied(), same=True, chapters=(0.0, 5.0))
+    assert failing(checks) == [] and [c.name for c in checks] == ["same_video", "gop", "fields"]
+
+
+def test_a_copied_title_fails_when_the_video_changed() -> None:
+    assert "same_video" in failing(qa.copied_checks(copied(), copied(), False, (0.0,)))
+
+
+def test_a_long_gop_or_a_chapter_on_an_open_gop_fails() -> None:
+    assert "gop" in failing(qa.copied_checks(copied(max_gop_fields=38), copied(), True, (0.0,)))
+    opened = copied(gops=[(0.0, True), (5.0, False)])
+    assert "gop" in failing(qa.copied_checks(opened, copied(), True, (0.0, 5.0)))
+
+
+def test_field_breaks_of_the_original_disc_only_warn() -> None:
+    breaks = copied(parity_breaks=3)
+    same = qa.copied_checks(breaks, breaks, True, (0.0,))
+    new = qa.copied_checks(breaks, copied(), True, (0.0,))
+
+    fields = next(c for c in same if c.name == "fields")
+    assert fields.ok and fields.warning and "já existiam no DVD original" in fields.detail
+    assert "fields" in failing(new)

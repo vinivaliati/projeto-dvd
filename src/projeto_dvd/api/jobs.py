@@ -209,9 +209,12 @@ def _steps(plan: DiscPlan, job: Job) -> tuple[StepView, ...]:
 
 
 def _title_steps(title: TitlePlan) -> list[Step]:
+    encode = (Step.VIDEO_PASS1, Step.VIDEO_PASS2, Step.PULLDOWN)
     return [
         step for step in TITLE_STEPS
-        if not (step == Step.PULLDOWN and title.mode != VideoMode.FILM)
+        if not (step == Step.VIDEO_COPY and not title.copy_video)
+        and not (step in encode and title.copy_video)
+        and not (step == Step.PULLDOWN and title.mode != VideoMode.FILM)
         and not (step == Step.SUBTITLES and not title.subtitles)
     ]  # fmt: skip
 

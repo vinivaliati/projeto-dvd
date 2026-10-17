@@ -365,3 +365,18 @@ def test_clean_cache_refuses_while_a_job_is_active(client: TestClient, settings:
 
     assert client.post("/cache/clean", headers=SAME).status_code == 409
     assert video.exists()
+
+
+def test_a_copied_title_shows_the_copy_step(client: TestClient) -> None:
+    engine = engine_of(client)
+    plan = make_disc_plan(titles=(movie_title(copy_video=True, video_bytes=10),
+                                  movie_title(path="Filme/2.mkv")))  # fmt: skip
+    with Session(engine) as session:  # type: ignore[arg-type]
+        job_id = store.enqueue(session, plan)
+    store.claim_next(engine)  # type: ignore[arg-type]
+    store.save_progress(engine, job_id, "1:video_copy", 0.1)  # type: ignore[arg-type]
+
+    text = client.get(f"/jobs/{job_id}").text
+
+    assert "Etapa atual: Título 1 de 2 · Vídeo copiado do DVD" in text
+    assert "Título 1 de 2 · Vídeo: 1ª passada" not in text

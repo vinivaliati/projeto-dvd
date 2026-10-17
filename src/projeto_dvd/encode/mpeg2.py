@@ -21,6 +21,7 @@ PICTURE_CODING_EXTENSION = 8
 PULLDOWN_VERSION = 1
 FILM_RATE_CODE = 1  # 23.976
 NTSC_RATE_CODE = 4  # 29.97
+FIELD_RATE = 60000 / 1001  # NTSC fields per second
 # (top_field_first, repeat_first_field) by display position: T B T | B T | B T B | T B
 FILM_CYCLE = ((True, True), (False, False), (False, True), (True, False))
 CHECK_EVERY = 1000
@@ -94,6 +95,13 @@ class StreamReport:
     max_gop: int = 0
     open_gops: int = 0
     parity_breaks: int = 0  # a picture starting on the same field parity the last one ended
+    # Phase 4b, for copied DVD video: GOP length in displayed fields, where each GOP starts (in
+    # seconds) and whether it is closed, the first GOP closed (or broken_link), and a sequence
+    # header before every GOP.
+    max_gop_fields: int = 0
+    gops: list[tuple[float, bool]] = field(default_factory=list)
+    first_gop_closed: bool = True
+    headers_every_gop: bool = True
 
 
 def inspect_stream(path: Path) -> StreamReport:
@@ -106,9 +114,14 @@ def inspect_bytes(data: bytes | mmap.mmap) -> StreamReport:
     gop: list[tuple[int, bool, bool]] = []  # (temporal_reference, tff, rff) in coded order
     expected: list[bool] = []  # the parity the next displayed picture must start with
     temporal = 0
+    fields = [0]  # displayed fields before the current GOP
+    header_seen = [False]
 
     def close_gop() -> None:
         report.max_gop = max(report.max_gop, len(gop))
+        gop_fields = sum(3 if rff else 2 for _, _, rff in gop)
+        report.max_gop_fields = max(report.max_gop_fields, gop_fields)
+        fields[0] += gop_fields
         for _, tff, rff in sorted(gop):
             if expected and tff != expected[0]:
                 report.parity_breaks += 1
@@ -120,10 +133,17 @@ def inspect_bytes(data: bytes | mmap.mmap) -> StreamReport:
         if code == SEQUENCE_HEADER:
             report.aspect_codes.add(data[position + 7] >> 4)
             report.frame_rate_codes.add(data[position + 7] & 0x0F)
+            header_seen[0] = True
         elif code == GOP:
             close_gop()
-            if not data[position + 7] & 0x40:
+            closed = bool(data[position + 7] & 0x40)
+            if not closed:
                 report.open_gops += 1
+            if not report.gops:
+                report.first_gop_closed = closed or bool(data[position + 7] & 0x20)
+            report.gops.append((fields[0] / FIELD_RATE, closed))
+            report.headers_every_gop = report.headers_every_gop and header_seen[0]
+            header_seen[0] = False
         elif code == PICTURE:
             temporal = (data[position + 4] << 2) | (data[position + 5] >> 6)
             report.pictures += 1

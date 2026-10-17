@@ -724,3 +724,102 @@ def test_preflight_asks_for_more_room_with_the_cache(
 
     assert without == []
     assert "Falta espaço na pasta de trabalho" in with_cache[0]
+
+
+# Copied DVD video
+
+
+def copied_movie(**fields: object) -> DiscPlan:
+    return make_movie(movie_title(copy_video=True, video_bytes=10**6, **fields))
+
+
+def test_a_copied_title_skips_the_encode(
+    dirs: tuple[Path, Path, Path], no_pulldown: list[Path]
+) -> None:
+    tools = FakeTools()
+    steps: list[tuple[Step, int]] = []
+    media, job, output = dirs
+    tools.plan = copied_movie()
+
+    result = run_pipeline(tools.plan, media_dir=media, job_dir=job, output_dir=output,
+                          tools=tools, report=lambda s, f, t: steps.append((s, t)),
+                          should_cancel=lambda: False)  # fmt: skip
+
+    assert [c for c in tools.commands if "-pass" in c] == [] and no_pulldown == []
+    copy = next(c for c in tools.commands if "copy" in c and "mpeg2video" in c)
+    assert copy[-1] == str(job / "title1.m2v")
+    assert (Step.VIDEO_COPY, 1) in steps and (Step.VIDEO_PASS1, 1) not in steps
+    assert result.qa_json is not None
+    report = QaReport.model_validate_json(result.qa_json)
+    assert report.passed, [c for c in report.checks if not c.ok]
+    assert {"t1-same_video", "t1-gop", "t1-fields", "t1-bitstream"} <= {
+        c.name for c in report.checks
+    }
+
+
+@pytest.mark.parametrize(
+    ("change", "reason"),
+    [
+        ({"aspect_codes": {2}}, "aspecto"),
+        ({"headers_every_gop": False}, "sequence header"),
+        ({"first_gop_closed": False}, "primeiro GOP"),
+        ({"max_gop_fields": 38}, "GOP"),
+        ({"progressive_sequence": {1}}, "29,97"),
+    ],
+)
+def test_a_copied_video_out_of_the_standard_stops_at_once(
+    dirs: tuple[Path, Path, Path], stream_report: list[StreamReport], change: dict[str, object],
+    reason: str,
+) -> None:  # fmt: skip
+    bad = StreamReport(frame_rate_codes={4}, progressive_sequence={0}, aspect_codes={3},
+                       max_gop=12)  # fmt: skip
+    for key, value in change.items():
+        setattr(bad, key, value)
+    stream_report[0] = bad
+
+    with pytest.raises(PipelineError) as caught:
+        run(dirs, FakeTools(), copied_movie())
+
+    assert caught.value.step == Step.VIDEO_COPY
+    assert "não segue o padrão do DVD" in caught.value.message and reason in caught.value.message
+    assert "Recodificar os rips" in caught.value.message
+
+
+def test_a_copied_video_bigger_than_planned_stops(dirs: tuple[Path, Path, Path]) -> None:
+    with pytest.raises(PipelineError) as caught:
+        run(dirs, FakeTools(), make_movie(movie_title(copy_video=True, video_bytes=1)))
+
+    assert "mudou desde o plano" in caught.value.message
+
+
+def test_an_underflow_in_the_mux_of_a_copied_title_stops(dirs: tuple[Path, Path, Path]) -> None:
+    tools = FakeTools()
+    original = tools.run
+
+    def underflow(command: list[str], **kwargs: object) -> RunResult:
+        result = original(command, **kwargs)  # type: ignore[arg-type]
+        if "-muxrate" in command and "title1.mpg" in command[-1]:
+            return RunResult(result.progress, "[dvd @ 0x1] buffer underflow st=1")
+        return result
+
+    tools.run = underflow  # type: ignore[method-assign]
+
+    with pytest.raises(PipelineError) as caught:
+        run(dirs, tools, copied_movie())
+
+    assert caught.value.step == Step.MUX and "Tire uma faixa de áudio" in caught.value.message
+
+
+def test_the_chapters_of_a_copied_title_go_to_closed_gops(
+    dirs: tuple[Path, Path, Path], stream_report: list[StreamReport]
+) -> None:
+    gops = [(0.0, True), (299.8, True), (600.0, False)]
+    rip_report = StreamReport(frame_rate_codes={4}, progressive_sequence={0}, aspect_codes={3},
+                              max_gop=12, gops=gops)  # fmt: skip
+    stream_report[0] = rip_report
+
+    run(dirs, FakeTools(), copied_movie(chapters=(0.0, 300.0, 600.0)))
+
+    xml = (dirs[1] / "dvd.xml").read_text()
+    assert 'chapters="0:00:00.000,0:04:59.800"' in xml
+    assert "capítulo em 600.0 s saiu" in (dirs[1] / "job.log").read_text()

@@ -147,3 +147,38 @@ def test_pulldown_refuses_a_file_linked_to_the_cache(tmp_path: Path) -> None:
 
     with pytest.raises(mpeg2.PulldownError, match="cache"):
         mpeg2.apply_soft_pulldown(m2v)
+
+
+def rip_stream(closed: list[bool], header_every_gop: bool = True, rff: bool = True) -> bytes:
+    """GOPs of 6 pictures at 29.97 with soft pulldown (alternate RFF): 9 fields each."""
+    data = b""
+    for index, is_closed in enumerate(closed):
+        if index == 0 or header_every_gop:
+            data += sequence_header(rate=4) + sequence_extension()
+        data += gop(is_closed) + b"".join(
+            picture(t, k, tff=t % 2 == 0, rff=rff and t % 2 == 0) for t, k in CODED
+        )
+    return data
+
+
+def test_the_report_measures_gops_in_fields_and_times() -> None:
+    report = inspect_bytes(rip_stream([True, False, True]))
+
+    assert report.max_gop_fields == 15  # 6 pictures, 3 of them with a repeated field
+    assert report.first_gop_closed and report.headers_every_gop
+    assert [closed for _, closed in report.gops] == [True, False, True]
+    assert report.gops[1][0] == pytest.approx(15 / (60000 / 1001))
+
+
+def test_a_stream_with_one_sequence_header_is_flagged() -> None:
+    report = inspect_bytes(rip_stream([True, True], header_every_gop=False))
+    assert not report.headers_every_gop
+
+
+def test_an_open_first_gop_is_flagged() -> None:
+    assert not inspect_bytes(rip_stream([False, True])).first_gop_closed
+
+
+def test_a_broken_link_counts_as_closed() -> None:
+    data = rip_stream([False, True]).replace(gop(False), gop(False)[:-1] + b"\x20", 1)
+    assert inspect_bytes(data).first_gop_closed

@@ -6,6 +6,7 @@ import pytest
 
 from projeto_dvd.authoring.dvd.dvdauthor import (
     MAX_COMMANDS,
+    chapters_on_closed_gops,
     command_count,
     disc_xml,
     title_dispatcher,
@@ -256,3 +257,27 @@ def test_letterbox_buttons_are_the_widescreen_ones_moved() -> None:
 def test_spumux_and_page_file() -> None:
     assert spumux_menu_command(Path("b.xml"), 1) == ["spumux", "-m", "dvd", "-s", "1", "b.xml"]
     assert page_file(JOB, 3) == JOB / "menu3.mpg"
+
+
+# Copied DVD video
+
+
+def test_chapters_move_to_the_nearest_closed_gop() -> None:
+    gops = [(0.0, True), (0.5, False), (5.2, True), (5.7, False), (11.0, False), (20.4, True)]
+
+    kept, dropped = chapters_on_closed_gops((0.0, 5.5, 11.0, 20.0), gops)
+
+    assert kept == (0.0, 5.2, 20.4)
+    assert dropped == [11.0]  # no closed GOP within 1 s
+
+
+def test_two_chapters_on_the_same_gop_become_one() -> None:
+    kept, _ = chapters_on_closed_gops((0.0, 5.0, 5.4), [(0.0, True), (5.2, True)])
+    assert kept == (0.0, 5.2)
+
+
+def test_the_disc_uses_the_adjusted_chapters_of_a_copied_title() -> None:
+    root = ET.fromstring(disc_xml(make_disc_plan(), JOB, chapters={1: (0.0, 5.2)}))
+    vobs = root.findall("titleset/titles/pgc/vob")
+    assert vobs[0].get("chapters") == "0:00:00.000,0:00:05.200"
+    assert vobs[1].get("chapters") == "0:00:00.000,0:05:00.000"
