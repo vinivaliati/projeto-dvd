@@ -35,6 +35,7 @@ FRAMES_UNREADABLE = (
 FILM_RATE = Fraction(24000, 1001)
 NTSC_RATE = Fraction(30000, 1001)
 SD_WIDTHS = (720, 704)
+WINDOW_GAP = 1.0  # seconds between two frames of the sample that start a new window
 INTERLACED_ORDERS = frozenset({"tt", "bb", "tb", "bt"})
 WINDOW_SECONDS = 20
 SIXTEEN_NINE = 16 / 9
@@ -88,7 +89,8 @@ def frame_scan_command(path: Path, duration: float) -> list[str]:
     windows = ",".join(f"{duration * share:.3f}%+{WINDOW_SECONDS}" for share in (0.1, 0.5, 0.9))
     return [
         "ffprobe", "-v", "error", "-select_streams", "v:0", "-read_intervals", windows,
-        "-show_entries", "frame=repeat_pict,interlaced_frame,top_field_first",
+        "-show_entries",
+        "frame=repeat_pict,interlaced_frame,top_field_first,key_frame,best_effort_timestamp_time",
         "-of", "json", str(path.absolute()),
     ]  # fmt: skip
 
@@ -107,6 +109,33 @@ def classify_frames(probe_json: str) -> VideoMode | str:
     if repeated == 0 and interlaced == 0:
         return PROGRESSIVE_2997
     return VideoMode.HYBRID
+
+
+def max_gop_fields(probe_json: str) -> int:
+    """The longest GOP of the sample in displayed fields (2 per picture, 3 when repeated).
+
+    Only whole GOPs count: each window of the sample starts and ends mid-GOP.
+    """
+    longest, fields, started, last = 0, 0, False, None
+    for frame in json.loads(probe_json).get("frames", []):
+        time = _float_or_none(frame.get("best_effort_timestamp_time"))
+        if last is not None and time is not None and time - last > WINDOW_GAP:
+            fields, started = 0, False  # a new window
+        if time is not None:
+            last = time
+        if frame.get("key_frame") == 1:
+            if started:
+                longest = max(longest, fields)
+            fields, started = 0, True
+        fields += 2 + (1 if frame.get("repeat_pict", 0) else 0)
+    return longest
+
+
+def _float_or_none(value: object) -> float | None:
+    try:
+        return float(str(value))
+    except ValueError:
+        return None
 
 
 def top_field_first_from_frames(probe_json: str) -> bool:

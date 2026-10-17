@@ -7,7 +7,7 @@ from PIL import Image
 
 from projeto_dvd.library.files import ExternalSubtitle
 from projeto_dvd.menus.theme import PALETTE
-from projeto_dvd.planner.calculator import MENU_PAGE_BYTES, Quality
+from projeto_dvd.planner.calculator import Quality, menu_bytes
 from projeto_dvd.planner.disc_build import (
     TitleSource,
     build_disc_plan,
@@ -116,7 +116,7 @@ def test_build_disc_plan_shares_one_bitrate_and_counts_the_menus() -> None:
     expected = disc_estimate(DVD9, plan.titles, len(menu.pages))
     assert (plan.video_kbps, plan.estimated_bytes) == (expected.video_kbps, expected.size_bytes)
     without = disc_estimate(DVD9, plan.titles, 0)
-    assert plan.estimated_bytes - without.size_bytes < len(menu.pages) * MENU_PAGE_BYTES + 1
+    assert plan.estimated_bytes - without.size_bytes < menu_bytes(len(menu.pages)) + 1
     assert (plan.volume, plan.iso_name, plan.confirmed_low) == ("P", "P.iso", True)
     assert plan.subtitle_on == 0
 
@@ -160,3 +160,45 @@ def test_a_source_without_duration_is_refused() -> None:
     bad = replace(good, summary=replace(good.summary, duration=None))
     with pytest.raises(ValueError, match="without video or duration"):
         title_plan(TitleSource(bad, VideoMode.FILM, True), choices(), "A")
+
+
+# DVD rips
+
+
+def rip_source(gop_fields: int | None = 30, **title_kwargs: Any) -> TitleSource:
+    from tests.unit.test_disc import rip
+
+    return TitleSource(rip(**title_kwargs), VideoMode.FILM, True, gop_fields)
+
+
+def test_a_rip_is_planned_as_copied_video() -> None:
+    plan = title_plan(rip_source(), choices(audio=("pt", "en")), "Rip")
+
+    assert (plan.copy_video, plan.video_bytes) == (True, 3_000_000_000)
+    assert plan.chapters == (0.0,)  # no chapters in the file: just the start
+
+
+def test_a_copied_rip_keeps_the_chapters_of_the_file() -> None:
+    from tests.unit.test_disc import RIP_VIDEO, rip
+
+    made = rip()
+    with_chapters = replace(made, summary=replace(made.summary, chapters=(0.0, 600.0, 1200.0)))
+    source = TitleSource(with_chapters, VideoMode.FILM, True, 30)
+
+    plan = title_plan(source, choices(chapters="every", minutes=5), "Rip")
+
+    assert plan.chapters == (0.0, 600.0, 1200.0)
+    assert RIP_VIDEO["codec_name"] == "mpeg2video"
+
+
+def test_a_long_gop_in_the_sample_recodes_the_rip() -> None:
+    plan = title_plan(rip_source(gop_fields=38), choices(), "Rip")
+    assert (plan.copy_video, plan.video_bytes) == (False, None)
+
+
+def test_the_estimate_counts_the_copied_size() -> None:
+    copied = title_plan(rip_source(), choices(), "Rip")
+    recoded = title_plan(rip_source(), choices(reencode_rips=True), "Rip")
+
+    assert disc_estimate(DVD9, [copied], 1).video_kbps == 0
+    assert disc_estimate(DVD9, [recoded], 1).video_kbps > 0

@@ -336,3 +336,4 @@ footer.credits img { display: block; height: 12px; width: auto; }
 .disc-bar { position: sticky; bottom: 0; display: flex; flex-wrap: wrap; justify-content: space-between;
   gap: 4px 16px; padding: 8px 16px; margin: 16px -16px 0; background: var(--surface);
   border-top: 1px solid var(--border); }
+.cache-line { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin: 0 0 16px; }

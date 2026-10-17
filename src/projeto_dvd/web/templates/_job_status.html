@@ -43,6 +43,12 @@
     <p class="banner banner-error" role="status">{{ job.error or "A geração falhou." }}</p>
   {% endif %}
 
+  {% if view.resume_errors %}
+  <div class="banner banner-error" role="alert"><ul>{% for error in view.resume_errors %}<li>{{ error }}</li>{% endfor %}</ul></div>
+  {% endif %}
+  {% if view.can_resume %}
+  <p class="muted">Retomar continua do ponto em que parou: o vídeo dos títulos já codificados vem do cache.</p>
+  {% endif %}
   {% if job.status != "done" %}
   <ol class="steps">
     {% for step in view.steps %}
@@ -76,6 +82,11 @@
             hx-swap="outerHTML" hx-confirm="Tirar este job da fila?">Cancelar</button>
     {% elif view.canceling %}
     <span class="muted">Cancelando...</span>
+    {% endif %}
+    {% if view.can_resume %}
+    <button class="button primary" type="button"
+            hx-post="{{ url_for('resume_job', job_id=job.id) }}" hx-target="#job-status"
+            hx-swap="outerHTML" hx-disabled-elt="this">Retomar</button>
     {% endif %}
     {% if job.status in ("failed", "canceled") %}
     <a class="button secondary" href="{{ url_for('dvd_form', name=job.folder | urlencode) }}">Gerar de novo</a>

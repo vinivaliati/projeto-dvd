@@ -49,6 +49,10 @@ class Video:
     hdr: bool
     dolby_vision_5: bool
     start_time: float
+    # A DVD rip: the stream size MakeMKV records (NUMBER_OF_BYTES tag) and the sequence
+    # header limits ("CPB properties": max bit rate, VBV buffer size). Phase 4b.
+    stream_bytes: int | None = None
+    dvd_header: tuple[int, int] | None = None
 
 
 @dataclass(frozen=True)
@@ -173,7 +177,26 @@ def _video(stream: dict[str, Any]) -> Video:
         hdr=stream.get("color_transfer") in HDR_TRANSFERS or bool(dovi),
         dolby_vision_5=any(side.get("dv_profile") == 5 for side in dovi),
         start_time=_float(stream.get("start_time")) or 0.0,
+        stream_bytes=_stream_bytes(stream),
+        dvd_header=_dvd_header(stream),
     )
+
+
+def _stream_bytes(stream: dict[str, Any]) -> int | None:
+    """MakeMKV and mkvmerge write NUMBER_OF_BYTES, often with a language suffix (-eng)."""
+    for name, value in _tags(stream).items():
+        if name.split("-")[0].upper() == "NUMBER_OF_BYTES":
+            return _int(value)
+    return None
+
+
+def _dvd_header(stream: dict[str, Any]) -> tuple[int, int] | None:
+    for side in stream.get("side_data_list", []):
+        if side.get("side_data_type") == "CPB properties":
+            peak, buffer = _int(side.get("max_bitrate")), _int(side.get("buffer_size"))
+            if peak and buffer:
+                return peak, buffer
+    return None
 
 
 def _aspect(stream: dict[str, Any], width: int, height: int) -> float | None:

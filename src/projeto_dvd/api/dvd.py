@@ -26,6 +26,8 @@ from projeto_dvd.planner.calculator import Estimate, suggest_profile
 from projeto_dvd.planner.disc import (
     DiscTitle,
     audio_languages,
+    copy_reason,
+    is_rip,
     menu_name,
     missing_languages,
     reconcile,
@@ -37,6 +39,7 @@ from projeto_dvd.planner.disc_build import (
     TitleSource,
     build_disc_plan,
     disc_errors,
+    disc_estimate,
     disc_estimates,
     menu_plan,
 )
@@ -52,6 +55,7 @@ from projeto_dvd.planner.disc_source import (
     theme_image,
 )
 from projeto_dvd.planner.languages import language_name
+from projeto_dvd.planner.profiles import PROFILES
 from projeto_dvd.planner.source import check_video
 
 router = APIRouter()
@@ -121,6 +125,7 @@ def parse_disc_form(form: Mapping[str, list[str]], disc: Disc) -> DiscChoices | 
         "kind": one("kind"), "order": tuple(order), "profile": one("profile"),
         "audio": tuple(audio), "subtitles": tuple(subtitles),
         "subtitle_on": one("subtitle_on") or None, "chapters": one("chapters", "every"),
+        "reencode_rips": one("reencode_rips") == "1",
         "theme": {"backdrop": backdrop if backdrop in disc.backdrops else None,
                   "accent": one("accent", "auto"), "side": one("side", "left")},
     }  # fmt: skip
@@ -229,8 +234,13 @@ async def create_dvd(
     if not errors:
         menu = disc_menu(choices, disc.titles, name, settings.output_dir)
         plan = build_disc_plan(name, sources, choices, menu, confirm_low, replace_iso)
+        # The frame sample may recode a rip the page planned as a copy: check the real plan.
+        final = disc_estimate(PROFILES[choices.profile], plan.titles, len(menu.pages))
+        errors = disc_errors(choices, disc.titles, final, confirm_low)
+    if not errors:
         errors = preflight(settings.work_dir, settings.output_dir, plan.estimated_bytes,
-                           plan.iso_name, replace_iso)  # fmt: skip
+                           plan.iso_name, replace_iso,
+                           cache_on=settings.cache_limit_gb > 0)  # fmt: skip
     if errors:
         return _render(request, "dvd_form.html", settings, disc, choices, errors,
                        confirm_low=confirm_low, replace_iso=replace_iso)  # fmt: skip
@@ -319,6 +329,7 @@ def _render(
         "labels": _menu_labels(ordered, menu), "names": [menu_name(t) for t in ordered],
         "warnings": track_warnings(disc.titles, choices),
         "badges": [missing_languages(title, choices) for title in ordered],
+        "copy_notes": [_copy_note(title, choices) for title in ordered],
         "audio_languages": audio_languages(disc.titles),
         "subtitle_languages": subtitle_languages(disc.titles), "language_name": language_name,
         "estimates": estimates, "chosen": _chosen(estimates, choices),
@@ -336,6 +347,14 @@ def _render(
         ),
     }  # fmt: skip
     return templates.TemplateResponse(request, template, context)
+
+
+def _copy_note(title: DiscTitle, choices: DiscChoices) -> str | None:
+    """What happens to the video of a DVD rip; None for anything else."""
+    if not is_rip(title):
+        return None
+    reason = copy_reason(title, choices)
+    return "vídeo copiado do DVD" if reason is None else f"recodificado: {reason}"
 
 
 def _menu_labels(ordered: Sequence[DiscTitle], menu: MenuPlan) -> list[str]:

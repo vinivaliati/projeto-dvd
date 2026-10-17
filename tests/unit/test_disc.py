@@ -1,5 +1,8 @@
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
+
+import pytest
 
 from projeto_dvd.library.files import ExternalSubtitle, VideoFile
 from projeto_dvd.library.probe import summarize
@@ -12,8 +15,10 @@ from projeto_dvd.planner.disc import (
     best_audio,
     best_subtitle,
     choice_errors,
+    copy_reason,
     disc_name,
     disc_titles,
+    is_rip,
     menu_name,
     reconcile,
     strip_prefix,
@@ -22,6 +27,7 @@ from projeto_dvd.planner.disc import (
     suggest_kind,
     suggest_order,
     track_warnings,
+    video_size,
 )
 from projeto_dvd.planner.disc_plan import DiscChoices, Theme
 from projeto_dvd.planner.dvd_plan import subtitle_options
@@ -403,3 +409,82 @@ def test_confirmed_episodes_order_by_tmdb_numbers() -> None:
               title("F/y.mkv", info=episode("F", 1, 1, "a"))]  # fmt: skip
     assert suggest_order(titles) == ("F/y.mkv", "F/x.mkv")
     assert suggest_kind([title("F/F.S01E01.mkv", info=movie("m"))]) == "movies"
+
+
+# Copying the video of DVD rips
+
+RIP_VIDEO = {
+    "index": 0, "codec_type": "video", "codec_name": "mpeg2video", "width": 720, "height": 480,
+    "r_frame_rate": "30000/1001", "avg_frame_rate": "30000/1001",
+    "display_aspect_ratio": "16:9", "start_time": "0.000",
+    "tags": {"NUMBER_OF_BYTES-eng": "3000000000"},
+    "side_data_list": [{"side_data_type": "CPB properties", "max_bitrate": 9800000,
+                        "buffer_size": 1835008}],
+}  # fmt: skip
+
+
+def rip(
+    audio_tracks: list[dict[str, Any]] | None = None, video: dict[str, Any] | None = None,
+    subtitles: list[dict[str, Any]] | None = None,
+) -> DiscTitle:  # fmt: skip
+    tracks = audio_tracks or [audio(1, "por", 6, bit_rate="448000"),
+                              audio(2, "eng", 6, bit_rate="448000")]  # fmt: skip
+    made = title("R/Rip.mkv", tracks, subtitles, video_stream=video or RIP_VIDEO)
+    return replace(made, video=replace(made.video, size=4 * 10**9))
+
+
+def test_a_dvd_rip_is_copied() -> None:
+    assert is_rip(rip())
+    assert copy_reason(rip(), choices(audio=("pt", "en"))) is None
+    assert video_size(rip()) == 3_000_000_000
+
+
+def test_a_movie_that_is_not_a_dvd_rip_is_never_a_rip() -> None:
+    assert not is_rip(title("P/a.mkv"))
+    no_header = {**RIP_VIDEO, "side_data_list": []}
+    assert not is_rip(rip(video=no_header))
+    header = {"side_data_type": "CPB properties", "max_bitrate": 15000000, "buffer_size": 1835008}
+    tv = {**RIP_VIDEO, "side_data_list": [header]}
+    assert not is_rip(rip(video=tv))
+    narrow = {**RIP_VIDEO, "width": 704}
+    assert not is_rip(rip(video=narrow))
+
+
+def test_more_audio_than_the_original_disc_is_recoded() -> None:
+    stereo = rip([audio(1, "por", 2, bit_rate="192000"), audio(2, "eng", 6, codec="dts")])
+    # the DTS becomes 448k AC-3: more than the 192k the original disc carried with the video
+    assert copy_reason(stereo, choices(audio=("pt", "en"))) == (
+        "as faixas escolhidas pedem mais espaço que o disco original"
+    )
+    assert copy_reason(stereo, choices(audio=("pt",))) is None
+
+
+def test_subtitles_count_in_the_budget() -> None:
+    tight = rip([audio(1, "por", 2, bit_rate="192000")], subtitles=[sub(3, "por")])
+    assert copy_reason(tight, choices(audio=("pt",), subtitles=("pt",))) is not None
+
+
+def test_the_reencode_box_recodes_the_rips() -> None:
+    assert copy_reason(rip(), choices(reencode_rips=True)) == "Recodificar os rips está marcado"
+
+
+def test_the_video_size_without_the_tag_is_the_file_minus_the_audio() -> None:
+    untagged = rip(video={**RIP_VIDEO, "tags": {}})
+    tiny = replace(untagged, video=replace(untagged.video, size=1))
+    assert video_size(tiny) is None  # the audio alone is bigger than the file
+    assert copy_reason(tiny, choices()) == "tamanho do vídeo desconhecido"
+
+
+def test_the_video_size_from_the_file(monkeypatch: pytest.MonkeyPatch) -> None:
+    untagged = rip(video={**RIP_VIDEO, "tags": {}})
+    sized = replace(untagged, video=replace(untagged.video, size=10**9))
+    assert is_rip(sized)
+    # 2700 s of 2 x 448 kbps of audio = 302.4 MB
+    assert video_size(sized) == 10**9 - 302_400_000
+    silent_rate = rip([audio(1, "por", 6)], video={**RIP_VIDEO, "tags": {}})
+    assert video_size(replace(silent_rate, video=replace(silent_rate.video, size=10**9))) is None
+
+
+def test_a_title_without_video_has_no_size_and_is_no_rip() -> None:
+    blind = replace(rip(), summary=replace(rip().summary, video=None))
+    assert video_size(blind) is None and not is_rip(blind)

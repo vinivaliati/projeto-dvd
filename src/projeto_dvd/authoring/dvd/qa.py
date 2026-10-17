@@ -7,6 +7,7 @@ Commands are built here and run by the pipeline; the checks are pure functions o
 output. A failed check keeps the ISO out of the output folder.
 """
 
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +24,7 @@ GIB = 1024**3
 DISC_TREE = ("/AUDIO_TS", "/VIDEO_TS/VIDEO_TS.IFO", "/VIDEO_TS/VIDEO_TS.BUP")
 ASPECT_CODES = {"16:9": 3, "4:3": 2}
 MAX_GOP = 12
+MAX_GOP_FIELDS = 36  # copied video: the NTSC limit in displayed fields
 CHAPTER_TOLERANCE = 1.0
 DURATION_TOLERANCE = 1.0
 SYNC_TOLERANCE = 0.005
@@ -194,6 +196,32 @@ def bitstream_checks(report: StreamReport, aspect: str) -> list[Check]:
               detail=f"maior GOP {report.max_gop}, abertos {report.open_gops}"),
         Check(name="fields", label="Ordem dos campos contínua (sem tremida)",
               ok=report.parity_breaks == 0, detail=f"{report.parity_breaks} quebras"),
+    ]  # fmt: skip
+
+
+CELL_TOLERANCE = 0.05  # seconds between a chapter and the GOP it should start on
+
+
+def copied_checks(
+    disc: StreamReport, source: StreamReport, same: bool, chapters: Sequence[float]
+) -> list[Check]:
+    """A copied DVD video: identical to the rip, GOPs within the NTSC limit, cells on closed
+    GOPs, and the field order of the original disc (its breaks were already there)."""
+    closed = [start for start, is_closed in disc.gops if is_closed]
+    cells_ok = all(
+        chapter == 0 or any(abs(chapter - start) <= CELL_TOLERANCE for start in closed)
+        for chapter in chapters
+    )
+    gop_ok = disc.max_gop_fields <= MAX_GOP_FIELDS and cells_ok
+    breaks, original = disc.parity_breaks, source.parity_breaks
+    return [
+        Check(name="same_video", label="Vídeo idêntico ao do DVD original", ok=same),
+        Check(name="gop", label="GOPs de até 36 campos e capítulos em GOP fechado", ok=gop_ok,
+              detail=f"maior GOP {disc.max_gop_fields} campos"),
+        Check(name="fields", label="Ordem dos campos igual à do DVD original",
+              ok=breaks == original, warning=breaks > 0,
+              detail=f"{breaks} quebras, já existiam no DVD original" if breaks == original
+              else f"{breaks} quebras no disco, {original} no original"),
     ]  # fmt: skip
 
 

@@ -109,6 +109,41 @@ def enqueue(session: Session, plan: DiscPlan) -> int:
     return job.id
 
 
+RESUME = text(
+    """
+    UPDATE job
+    SET status = 'queued'
+      , error = NULL
+      , step = NULL
+      , progress = 0
+      , cancel_requested = 0
+      , qa_json = NULL
+      , started_at = NULL
+      , finished_at = NULL
+      , created_at = :now
+    WHERE id = :id
+      AND status IN ('failed', 'canceled')
+    """
+).bindparams(bindparam("now", type_=DateTime()))
+
+
+def resume(engine: Engine, job_id: int) -> bool:
+    """Put a failed or canceled job back in the queue, as it is; False if it was not stopped.
+
+    ActiveJobError when the folder already has another job queued or running.
+    """
+    try:
+        with engine.begin() as connection:
+            return bool(connection.execute(RESUME, {"id": job_id, "now": _now()}).rowcount)
+    except IntegrityError as error:
+        with Session(engine) as session:
+            job = get_job(session, job_id)
+            active = active_job(session, job.folder) if job else None
+        if active is None or active.id is None:
+            raise
+        raise ActiveJobError(active.id) from error
+
+
 def get_job(session: Session, job_id: int) -> Job | None:
     return session.get(Job, job_id)
 

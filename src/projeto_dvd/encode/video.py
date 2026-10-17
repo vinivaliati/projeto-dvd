@@ -72,3 +72,11 @@ def video_pass_command(
     if pass_number == 1:
         return [*command, "-f", "null", "-"]
     return [*command, "-f", "mpeg2video", str(m2v_path(job_dir, number))]
+
+
+def copy_command(source: Path, video_index: int, output: Path) -> list[str]:
+    """The MPEG-2 video of a DVD rip as it is: flags, pulldown and colour come along."""
+    return [
+        "ffmpeg", "-y", "-nostdin", "-i", str(source.absolute()), "-map", f"0:{video_index}",
+        "-c", "copy", "-progress", "pipe:1", "-nostats", "-f", "mpeg2video", str(output),
+    ]  # fmt: skip

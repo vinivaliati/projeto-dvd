@@ -1,5 +1,8 @@
+import html
+import shutil
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
@@ -231,3 +234,159 @@ def test_a_phase_3_step_belongs_to_its_only_title(client: TestClient) -> None:
     job_id = running_job(client, "audio", titles=1)
 
     assert "Etapa atual: Áudio" in client.get(f"/jobs/{job_id}").text
+
+
+# Resume and the cache
+
+
+@pytest.fixture
+def room(settings: Settings, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Work and output folders with plenty of free space, for the resume preflight."""
+    settings.work_dir.mkdir(parents=True, exist_ok=True)
+    settings.output_dir.mkdir(parents=True, exist_ok=True)
+    usage = shutil.disk_usage(settings.work_dir)
+    monkeypatch.setattr(shutil, "disk_usage", lambda path: usage._replace(free=10**12))
+
+
+def stopped_job(client: TestClient, status: JobStatus = JobStatus.FAILED,
+                folder: str = "Filme", **plan: Any) -> int:  # fmt: skip
+    engine = engine_of(client)
+    with Session(engine) as session:  # type: ignore[arg-type]
+        job_id = store.enqueue(session, make_movie(folder=folder, **plan))
+    store.claim_next(engine)  # type: ignore[arg-type]
+    store.finish(engine, job_id, status, error="O worker parou no meio.")  # type: ignore[arg-type]
+    return job_id
+
+
+def test_a_stopped_job_offers_resume(client: TestClient) -> None:
+    job_id = stopped_job(client)
+
+    assert f'/jobs/{job_id}/resume"' in client.get(f"/jobs/{job_id}").text
+
+
+def test_resume_puts_the_job_back_and_keeps_only_the_log(
+    client: TestClient, room: None, settings: Settings
+) -> None:
+    job_id = stopped_job(client)
+    folder = job_dir(settings.work_dir, job_id)
+    make_file(folder / "job.log", b"antes\n")
+    make_file(folder / "disc.iso", b"x" * 100)
+
+    response = client.post(f"/jobs/{job_id}/resume", headers=SAME)
+
+    assert response.status_code == 200 and "Na fila" in response.text
+    assert sorted(p.name for p in folder.iterdir()) == ["job.log"]
+    with Session(engine_of(client)) as session:  # type: ignore[arg-type]
+        job = store.get_job(session, job_id)
+        assert job is not None and job.status == "queued"
+
+
+def test_resume_runs_the_preflight(client: TestClient, room: None, settings: Settings) -> None:
+    job_id = stopped_job(client)
+    make_file(settings.output_dir / "iso" / "Filme.iso")
+    folder = job_dir(settings.work_dir, job_id)
+    make_file(folder / "title1.mpg")
+
+    response = client.post(f"/jobs/{job_id}/resume", headers=SAME)
+
+    assert "Já existe um ISO com este nome" in html.unescape(response.text)
+    assert (folder / "title1.mpg").exists()  # nothing cleaned when it cannot resume
+
+
+def test_only_the_last_job_of_a_folder_resumes(client: TestClient) -> None:
+    old = stopped_job(client)
+    stopped_job(client, JobStatus.CANCELED)
+
+    assert "/resume" not in client.get(f"/jobs/{old}").text
+    assert client.post(f"/jobs/{old}/resume", headers=SAME).status_code == 409
+
+
+def test_a_phase_3_job_or_a_done_one_does_not_resume(client: TestClient) -> None:
+    old = stopped_job(client, menu=None)
+    done = stopped_job(client, JobStatus.DONE, folder="Outro")
+
+    assert client.post(f"/jobs/{old}/resume", headers=SAME).status_code == 409
+    assert client.post(f"/jobs/{done}/resume", headers=SAME).status_code == 409
+    assert "/resume" not in client.get(f"/jobs/{done}").text
+
+
+def test_resume_when_another_job_of_the_folder_runs(
+    client: TestClient, room: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    job_id = stopped_job(client)
+
+    def busy(engine: object, job_id: int) -> bool:
+        raise store.ActiveJobError(42)
+
+    monkeypatch.setattr(store, "resume", busy)
+    response = client.post(f"/jobs/{job_id}/resume", headers=SAME)
+
+    assert 'href="/jobs/42"' in response.text
+
+
+def test_resume_of_a_job_that_already_changed(
+    client: TestClient, room: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    job_id = stopped_job(client)
+    monkeypatch.setattr(store, "resume", lambda engine, job_id: False)
+
+    assert client.post(f"/jobs/{job_id}/resume", headers=SAME).status_code == 409
+
+
+def test_cross_site_resume_and_clean_are_refused(client: TestClient) -> None:
+    job_id = stopped_job(client)
+    cross = {"Sec-Fetch-Site": "cross-site"}
+
+    assert client.post(f"/jobs/{job_id}/resume", headers=cross).status_code == 403
+    assert client.post("/cache/clean", headers=cross).status_code == 403
+
+
+def test_the_job_list_shows_the_cache(client: TestClient, settings: Settings) -> None:
+    make_file(settings.work_dir / "cache" / f"{'a' * 64}.m2v", b"x" * 3_000_000)
+
+    page = client.get("/jobs").text
+
+    assert "Cache de vídeo: 3 MB de 50 GB" in page and "/cache/clean" in page
+
+
+def test_clean_cache(client: TestClient, settings: Settings) -> None:
+    video = make_file(settings.work_dir / "cache" / f"{'a' * 64}.m2v")
+    notes = make_file(settings.work_dir / "cache" / "notas.txt")
+
+    response = client.post("/cache/clean", headers=SAME, follow_redirects=False)
+
+    assert (response.status_code, response.headers["location"]) == (303, "/jobs")
+    assert not video.exists() and notes.exists()
+
+
+def test_clean_cache_refuses_while_a_job_is_active(client: TestClient, settings: Settings) -> None:
+    video = make_file(settings.work_dir / "cache" / f"{'a' * 64}.m2v")
+    new_job(client)
+
+    assert client.post("/cache/clean", headers=SAME).status_code == 409
+    assert video.exists()
+
+
+def test_a_copied_title_shows_the_copy_step(client: TestClient) -> None:
+    engine = engine_of(client)
+    plan = make_disc_plan(titles=(movie_title(copy_video=True, video_bytes=10),
+                                  movie_title(path="Filme/2.mkv")))  # fmt: skip
+    with Session(engine) as session:  # type: ignore[arg-type]
+        job_id = store.enqueue(session, plan)
+    store.claim_next(engine)  # type: ignore[arg-type]
+    store.save_progress(engine, job_id, "1:video_copy", 0.1)  # type: ignore[arg-type]
+
+    text = client.get(f"/jobs/{job_id}").text
+
+    assert "Etapa atual: Título 1 de 2 · Vídeo copiado do DVD" in text
+    assert "Título 1 de 2 · Vídeo: 1ª passada" not in text
+
+
+def test_clean_cache_with_an_active_job_explains(client: TestClient, settings: Settings) -> None:
+    make_file(settings.work_dir / "cache" / f"{'a' * 64}.m2v")
+    new_job(client)
+
+    response = client.post("/cache/clean", headers=SAME)
+
+    assert response.status_code == 409
+    assert "Espere o job terminar" in response.text and 'href="/jobs"' in response.text

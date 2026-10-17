@@ -375,3 +375,22 @@ def test_stream_index_and_dvd_start_time() -> None:
     assert summary.video.index == 1
     assert summary.video.start_time == pytest.approx(0.533, abs=0.01)
     assert summary.audio[0].index == 2
+
+
+def test_the_size_tag_and_the_dvd_header_of_a_rip() -> None:
+    stream = {
+        "index": 0, "codec_type": "video", "codec_name": "mpeg2video", "width": 720,
+        "height": 480, "tags": {"NUMBER_OF_BYTES-eng": "3000000000", "BPS-eng": "5000000"},
+        "side_data_list": [{"side_data_type": "CPB properties", "max_bitrate": 9800000,
+                            "buffer_size": 1835008}],
+    }  # fmt: skip
+    video = summarize({"streams": [stream]}).video
+    assert video is not None
+    assert (video.stream_bytes, video.dvd_header) == (3_000_000_000, (9_800_000, 1_835_008))
+
+
+def test_a_stream_without_size_or_header() -> None:
+    stream = {"index": 0, "codec_type": "video", "codec_name": "h264", "width": 1920,
+              "height": 1080, "tags": {"NUMBER_OF_BYTES": "abc"}}  # fmt: skip
+    video = summarize({"streams": [stream]}).video
+    assert video is not None and (video.stream_bytes, video.dvd_header) == (None, None)

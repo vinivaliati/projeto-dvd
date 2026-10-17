@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 from projeto_dvd.encode.audio import audio_command
-from projeto_dvd.encode.video import video_filters, video_pass_command
+from projeto_dvd.encode.video import copy_command, video_filters, video_pass_command
 from projeto_dvd.planner.dvd_plan import AudioChoice
 from projeto_dvd.planner.source import VideoMode
 from tests.plans import make_movie, movie_title
@@ -108,3 +108,11 @@ def test_audio_that_starts_before_the_video_is_trimmed() -> None:
     command = audio_command(choice(offset=-0.25), SOURCE, JOB / "a.ac3")
 
     assert command[command.index("-ss") + 1] == "0.250000"
+
+
+def test_the_copy_command_extracts_the_video_as_it_is() -> None:
+    command = copy_command(SOURCE, 0, JOB / "title1.m2v")
+
+    assert command[command.index("-map") + 1] == "0:0"
+    assert command[command.index("-c") + 1] == "copy"
+    assert "-progress" in command and command[-3:] == ["-f", "mpeg2video", str(JOB / "title1.m2v")]

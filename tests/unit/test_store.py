@@ -141,3 +141,61 @@ def test_integrity_error_without_an_active_job_is_raised(
 
     with pytest.raises(IntegrityError):
         enqueue(session)
+
+
+def finished(session: Session, engine: Engine, status: JobStatus, folder: str = "Filme") -> int:
+    job_id = enqueue(session, folder)
+    store.claim_next(engine)
+    store.save_progress(engine, job_id, "1:audio", 0.4)
+    store.finish(engine, job_id, status, error="falhou", qa_json='{"x": 1}')
+    return job_id
+
+
+@pytest.mark.parametrize("status", [JobStatus.FAILED, JobStatus.CANCELED])
+def test_resume_puts_the_same_job_back_in_the_queue(
+    session: Session, engine: Engine, status: JobStatus
+) -> None:
+    job_id = finished(session, engine, status)
+    before = store.get_job(session, job_id)
+    assert before is not None
+    created = before.created_at
+
+    assert store.resume(engine, job_id) is True
+
+    session.expire_all()
+    job = store.get_job(session, job_id)
+    assert job is not None
+    assert (job.status, job.error, job.step, job.progress, job.qa_json, job.finished_at) == (
+        "queued", None, None, 0.0, None, None,
+    )  # fmt: skip
+    assert not job.cancel_requested and job.created_at >= created
+
+
+def test_resume_refuses_a_done_or_running_job(session: Session, engine: Engine) -> None:
+    done = finished(session, engine, JobStatus.DONE)
+    running = enqueue(session, "Outro")
+    store.claim_next(engine)
+
+    assert store.resume(engine, done) is False
+    assert store.resume(engine, running) is False
+
+
+def test_resume_while_the_folder_has_another_active_job(session: Session, engine: Engine) -> None:
+    old = finished(session, engine, JobStatus.FAILED)
+    active = enqueue(session)
+
+    with pytest.raises(store.ActiveJobError) as caught:
+        store.resume(engine, old)
+
+    assert caught.value.job_id == active
+
+
+def test_resume_reraises_when_the_other_job_ended_in_between(
+    session: Session, engine: Engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    old = finished(session, engine, JobStatus.FAILED)
+    enqueue(session)
+    monkeypatch.setattr(store, "active_job", lambda session, folder: None)
+
+    with pytest.raises(IntegrityError):
+        store.resume(engine, old)

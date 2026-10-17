@@ -9,7 +9,14 @@
     <span class="quality quality-{{ {'Ótima': 'great', 'Aceitável': 'ok', 'Baixa': 'low', 'Não cabe': 'none'}[item.quality] }}">{{ item.quality }}</span>
     <span class="numbers">Usa {{ item.size_bytes | size }} de {{ p.capacity_bytes | size }}</span>
     <span class="bar"><span style="width: {{ [used, 100] | min }}%"></span></span>
+    {% if item.video_kbps %}
     <span class="muted numbers">vídeo a {{ "%.1f" | format(item.video_kbps / 1000) | replace(".", ",") }} Mbps</span>
+    {% else %}
+    <span class="muted">vídeo copiado do DVD</span>
+    {% endif %}
+    {% if item.quality == "Não cabe" and "vídeo copiado do DVD" in copy_notes %}
+    <span class="muted">Não cabe com o vídeo copiado: marque "Recodificar os rips".</span>
+    {% endif %}
     {% if choices.profile == p.key %}<span class="chosen-label">Escolhido</span>{% endif %}
   </label>
   {% endfor %}

@@ -88,10 +88,17 @@
       Os do arquivo <span class="muted">(quem não tiver ganha um a cada {{ choices.minutes }} minutos)</span></label>
     <label class="radio"><input type="radio" name="chapters" value="every"{% if choices.chapters == "every" %} checked{% endif %}>
       A cada <input type="number" name="minutes" min="1" max="60" value="{{ choices.minutes }}" class="minutes"> minutos</label>
+    {% if "vídeo copiado do DVD" in copy_notes %}
+    <p class="muted">Os títulos com vídeo copiado usam os capítulos do DVD original (um capítulo no meio de um GOP mostraria blocos ao pular).</p>
+    {% endif %}
   </fieldset>
   <fieldset>
     <legend>Disco</legend>
     {% include "_profile_cards.html" %}
+    {% if copy_notes | select | list %}
+    <label class="confirm"><input type="checkbox" name="reencode_rips" value="1"{% if choices.reencode_rips %} checked{% endif %}>
+      Recodificar os rips de DVD (em vez de copiar o vídeo original)</label>
+    {% endif %}
   </fieldset>
 </div>
   {% include "_disc_confirm.html" %}

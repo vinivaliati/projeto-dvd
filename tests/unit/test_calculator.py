@@ -2,11 +2,13 @@ import pytest
 
 from projeto_dvd.planner.calculator import (
     MENU_PAGE_BYTES,
+    MENU_RESERVE_PAGES,
     Quality,
     TitleLoad,
     estimate,
     estimate_disc,
     maxrate_kbps,
+    menu_bytes,
     suggest_profile,
 )
 from projeto_dvd.planner.profiles import DVD5, DVD9, PROFILES, DiscProfile
@@ -116,10 +118,53 @@ def test_menu_bytes_count_in_the_size_when_capped() -> None:
 
     assert (
         estimate_disc(DVD5, loads, 3).size_bytes - estimate_disc(DVD5, loads, 0).size_bytes
-        == 3 * MENU_PAGE_BYTES
+        == MENU_RESERVE_PAGES * MENU_PAGE_BYTES
     )
+
+
+def test_menu_space_is_a_fixed_reserve_up_to_twenty_pages() -> None:
+    assert menu_bytes(0) == 0
+    assert menu_bytes(3) == menu_bytes(20) == 20 * MENU_PAGE_BYTES
+    assert menu_bytes(25) == 25 * MENU_PAGE_BYTES
+
+
+def test_changing_the_menu_pages_keeps_the_video_bitrate() -> None:
+    loads = [TitleLoad(5400.0, (448,), 0), TitleLoad(5400.0, (448,), 0)]
+
+    assert estimate_disc(DVD9, loads, 3).video_kbps == estimate_disc(DVD9, loads, 12).video_kbps
 
 
 def test_a_disc_without_duration_is_an_error() -> None:
     with pytest.raises(ValueError, match="disc without duration"):
         estimate_disc(DVD9, [TitleLoad(0.0, (192,), 0)], menu_pages=1)
+
+
+def test_copied_video_takes_its_own_size_and_the_rest_shares_what_is_left() -> None:
+    encoded = TitleLoad(5400.0, (448,), 0)
+    copied = TitleLoad(5400.0, (448,), 0, video_bytes=3 * 10**9)
+
+    alone = estimate_disc(DVD9, [encoded], 1)
+    mixed = estimate_disc(DVD9, [encoded, copied], 1)
+
+    assert mixed.video_kbps < alone.video_kbps
+    assert mixed.size_bytes <= DVD9.usable_bytes + DVD9.reserve_bytes
+    room = (DVD9.usable_bytes - menu_bytes(1)) * 8 / 1.03 / 1000
+    copied_kilobits = 3 * 10**9 * 8 / 1000 + 5400 * 448
+    assert mixed.video_kbps == int((room - copied_kilobits - 5400 * 448) / 5400)
+
+
+def test_the_maxrate_comes_only_from_the_encoded_titles() -> None:
+    encoded = TitleLoad(600.0, (192,), 0)
+    copied = TitleLoad(600.0, (448,) * 8, 0, video_bytes=10**8)
+
+    assert estimate_disc(DVD9, [encoded, copied], 0).maxrate_kbps == maxrate_kbps(DVD9, [192], 0)
+
+
+def test_a_disc_of_copies_only_is_great_when_it_fits() -> None:
+    fits = estimate_disc(DVD9, [TitleLoad(7200.0, (448,), 0, video_bytes=6 * 10**9)], 1)
+    too_big = estimate_disc(DVD5, [TitleLoad(7200.0, (448,), 0, video_bytes=6 * 10**9)], 1)
+
+    assert (fits.quality, fits.video_kbps, fits.maxrate_kbps) == (Quality.GREAT, 0, 0)
+    assert too_big.quality == Quality.DOES_NOT_FIT
+    expected = (6 * 10**9 * 8 / 1000 + 7200 * 448) * 1000 * 1.03 / 8
+    assert fits.size_bytes == int(expected) + DVD9.reserve_bytes + menu_bytes(1)

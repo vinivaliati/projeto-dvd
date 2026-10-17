@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from pydantic import SecretStr
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings
 
 
@@ -22,3 +22,6 @@ class Settings(BaseSettings):
     # TMDB API Read Access Token (Bearer); empty or missing turns the curation off. Phase 2.
     tmdb_token: SecretStr | None = None
     tmdb_language: str = "pt-BR"
+    # Encoded video kept to resume a job or rebuild a disc; the oldest leave first. 0 turns
+    # the cache off. Phase 4b.
+    cache_limit_gb: float = Field(default=50, ge=0)

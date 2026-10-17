@@ -1,3 +1,4 @@
+import os
 import signal
 from collections.abc import Callable
 from pathlib import Path
@@ -9,7 +10,7 @@ from sqlmodel import Session
 
 from projeto_dvd.authoring.dvd.qa import Check, QaReport
 from projeto_dvd.config import Settings
-from projeto_dvd.jobs import store, worker
+from projeto_dvd.jobs import cache, store, worker
 from projeto_dvd.jobs.pipeline import PipelineError, PipelineResult, QaFailed, Step
 from projeto_dvd.jobs.runner import Canceled, ProcessRunner
 from projeto_dvd.jobs.worker import Worker
@@ -284,3 +285,86 @@ def test_serve_keeps_going_while_there_are_jobs(
     worker.serve(instance, engine, poll_seconds=0.0)
 
     assert calls == [True, True, False]
+
+
+def test_the_worker_passes_the_cache_and_notes_the_start(
+    engine: Engine, session: Session, settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    job_id = queue(session)
+    monkeypatch.setattr(worker, "detect_versions", lambda: {"ffmpeg": "7.1"})
+    calls = fake_pipeline(monkeypatch, lambda plan, **kw: PipelineResult(
+        iso_path=settings.output_dir / "iso" / "Filme.iso", qa_json=None))  # fmt: skip
+
+    make_worker(engine, settings).run_once()
+
+    use = calls[0]["cache"]
+    assert (use.work_dir, use.limit_bytes, use.ffmpeg) == (settings.work_dir, 50 * 10**9, "7.1")
+    log = (settings.work_dir / "jobs" / str(job_id) / "job.log").read_text()
+    assert "[projeto-dvd] Início em " in log
+
+
+def cache_entry(work_dir: Path, key: str, age: int) -> Path:
+    video = make_file(work_dir / "cache" / f"{key}.m2v", b"x" * 10)
+    make_file(work_dir / "cache" / f"{key}.json", b'{"size": 10, "progress": {}}')
+    os.utime(video, (age, age))
+    return video
+
+
+def test_the_worker_trims_the_cache_before_a_job(
+    engine: Engine, session: Session, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    database_url: str,
+) -> None:  # fmt: skip
+    settings = Settings(media_dir=tmp_path / "media", work_dir=tmp_path / "work",
+                        output_dir=tmp_path / "out", database_url=database_url,
+                        cache_limit_gb=0)  # fmt: skip
+    old = cache_entry(settings.work_dir, "0" * 64, 1)
+    queue(session)
+    fake_pipeline(monkeypatch, lambda plan, **kw: PipelineResult(
+        iso_path=settings.output_dir / "iso" / "Filme.iso", qa_json=None))  # fmt: skip
+
+    make_worker(engine, settings).run_once()
+
+    assert not old.exists()
+
+
+def test_a_failed_qa_forgets_the_cached_video(
+    engine: Engine, session: Session, settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    queue(session)
+    monkeypatch.setattr(worker, "detect_versions", lambda: {"ffmpeg": "7.1"})
+    keys = cache.plan_keys(make_movie(), "7.1")
+    video = cache_entry(settings.work_dir, keys[0], 100)
+    other = cache_entry(settings.work_dir, "f" * 64, 100)
+    report = QaReport(checks=(Check(name="gop", label="GOP", ok=False),), iso_bytes=1,
+                      estimated_bytes=1)  # fmt: skip
+
+    def behaviour(plan: Any, **kwargs: Any) -> PipelineResult:
+        raise QaFailed(report)
+
+    fake_pipeline(monkeypatch, behaviour)
+    make_worker(engine, settings).run_once()
+
+    assert not video.exists() and other.exists()
+
+
+def test_the_messages_point_to_resume() -> None:
+    assert "Retomar" in worker.RESTARTED and "Retomar" in worker.STOPPED
+
+
+def test_a_cache_error_before_the_job_does_not_stop_the_worker(
+    engine: Engine, session: Session, settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    job_id = queue(session)
+
+    def broken(*args: object) -> int:
+        raise FileNotFoundError("cleaned in between")
+
+    monkeypatch.setattr(cache, "evict", broken)
+    fake_pipeline(monkeypatch, lambda plan, **kw: PipelineResult(
+        iso_path=settings.output_dir / "iso" / "Filme.iso", qa_json=None))  # fmt: skip
+
+    assert make_worker(engine, settings).run_once() is True
+
+    assert job(engine, job_id).status == "done"
+    log = (settings.work_dir / "jobs" / str(job_id) / "job.log").read_text()
+    assert "cache não limpo" in log

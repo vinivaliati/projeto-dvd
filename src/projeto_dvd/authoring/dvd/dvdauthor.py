@@ -1,7 +1,7 @@
 """dvdauthor XML: the VIDEO_TS structure, the menus and the navigation commands."""
 
 import xml.etree.ElementTree as ET
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from projeto_dvd.authoring.dvd.menus import page_file
@@ -38,7 +38,36 @@ SUBTITLE_PAGES = 101
 BUTTON = 1024  # SPRM 8 keeps the button number in its high bits
 
 
-def disc_xml(plan: DiscPlan, job_dir: Path) -> str:
+CHAPTER_REACH = 1.0  # seconds a chapter of a copied title may move to find a closed GOP
+
+
+def chapters_on_closed_gops(
+    chapters: Sequence[float], gops: Sequence[tuple[float, bool]], reach: float = CHAPTER_REACH
+) -> tuple[tuple[float, ...], list[float]]:
+    """Chapters of copied video moved to the nearest closed GOP; (kept, dropped).
+
+    dvdauthor puts a cell on the nearest GOP without a word, and jumping to an open one shows
+    two broken frames. The start stays: the job checks the first GOP on its own.
+    """
+    closed = [start for start, is_closed in gops if is_closed]
+    kept: set[float] = set()
+    dropped: list[float] = []
+    for chapter in chapters:
+        if chapter == 0:
+            kept.add(0.0)
+            continue
+        near = [start for start in closed if abs(start - chapter) <= reach]
+        if near:
+            kept.add(min(near, key=lambda start: abs(start - chapter)))
+        else:
+            dropped.append(chapter)
+    return tuple(sorted(kept)), dropped
+
+
+def disc_xml(
+    plan: DiscPlan, job_dir: Path, chapters: Mapping[int, tuple[float, ...]] | None = None
+) -> str:
+    """`chapters` replaces the planned chapters of some titles (copied video, by number)."""
     menu = plan.menu
     if menu is None:
         raise ValueError("a disc plan without menu")
@@ -70,7 +99,8 @@ def disc_xml(plan: DiscPlan, job_dir: Path) -> str:
             command = button_command(menu.pages, index, number, item)
             ET.SubElement(pgc, "button", name=str(number)).text = command
     for number, title in enumerate(plan.titles, 1):
-        _titleset(root, plan, number, title, job_dir)
+        starts = (chapters or {}).get(number, title.chapters)
+        _titleset(root, plan, number, title.model_copy(update={"chapters": starts}), job_dir)
     return ET.tostring(root, encoding="unicode")
 
 
