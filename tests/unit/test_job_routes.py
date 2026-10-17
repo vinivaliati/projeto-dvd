@@ -380,3 +380,13 @@ def test_a_copied_title_shows_the_copy_step(client: TestClient) -> None:
 
     assert "Etapa atual: Título 1 de 2 · Vídeo copiado do DVD" in text
     assert "Título 1 de 2 · Vídeo: 1ª passada" not in text
+
+
+def test_clean_cache_with_an_active_job_explains(client: TestClient, settings: Settings) -> None:
+    make_file(settings.work_dir / "cache" / f"{'a' * 64}.m2v")
+    new_job(client)
+
+    response = client.post("/cache/clean", headers=SAME)
+
+    assert response.status_code == 409
+    assert "Espere o job terminar" in response.text and 'href="/jobs"' in response.text

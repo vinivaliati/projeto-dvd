@@ -82,7 +82,11 @@ class Worker:
             job_log.write(f"[projeto-dvd] Início em {datetime.now(UTC).isoformat()}\n")
         use = self.cache_use()
         keys = cache.plan_keys(plan, use.ffmpeg)
-        cache.evict(use.work_dir, use.limit_bytes, keys)
+        try:
+            cache.evict(use.work_dir, use.limit_bytes, keys)
+        except OSError as error:  # the cache never stops a job (nor the worker)
+            with (job_dir / "job.log").open("a", encoding="utf-8") as job_log:
+                job_log.write(f"[projeto-dvd] cache não limpo ({error}).\n")
         should_cancel = self._cancel_check(job_id)
         report = self._reporter(job_id, plan)
         try:

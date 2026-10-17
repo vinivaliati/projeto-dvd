@@ -349,3 +349,22 @@ def test_a_failed_qa_forgets_the_cached_video(
 
 def test_the_messages_point_to_resume() -> None:
     assert "Retomar" in worker.RESTARTED and "Retomar" in worker.STOPPED
+
+
+def test_a_cache_error_before_the_job_does_not_stop_the_worker(
+    engine: Engine, session: Session, settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    job_id = queue(session)
+
+    def broken(*args: object) -> int:
+        raise FileNotFoundError("cleaned in between")
+
+    monkeypatch.setattr(cache, "evict", broken)
+    fake_pipeline(monkeypatch, lambda plan, **kw: PipelineResult(
+        iso_path=settings.output_dir / "iso" / "Filme.iso", qa_json=None))  # fmt: skip
+
+    assert make_worker(engine, settings).run_once() is True
+
+    assert job(engine, job_id).status == "done"
+    log = (settings.work_dir / "jobs" / str(job_id) / "job.log").read_text()
+    assert "cache não limpo" in log

@@ -32,8 +32,12 @@ def cache_key(disc: DiscPlan, number: int, ffmpeg_version: str | None) -> str:
     title = disc.titles[number - 1]
     fields = {
         "source": [title.path, title.size, title.mtime_ns],
-        # Fixed paths: the same encode in another job folder is the same video.
-        "command": video_pass_command(disc, number, Path("/media") / title.path, Path("/job"), 2),
+        # Fixed paths and output name: the same encode in another job folder, or of the same
+        # title at another position on the disc, is the same video.
+        "command": [
+            *video_pass_command(disc, number, Path("/media") / title.path, Path("/job"), 2)[:-1],
+            "/job/video.m2v",
+        ],
         "pulldown": mpeg2.PULLDOWN_VERSION,
         "ffmpeg": ffmpeg_version,
     }
@@ -75,7 +79,10 @@ def cache_bytes(work_dir: Path) -> int:
 
 
 def evict(work_dir: Path, limit_bytes: int, keep: Collection[str]) -> int:
-    """Delete the least recently used videos until the cache fits; returns the bytes freed."""
+    """Delete the least recently used videos until the cache fits; returns the bytes freed.
+
+    OSError (an entry removed by "Limpar cache" in between, a permission) goes to the caller.
+    """
     videos = sorted(_entries(work_dir, ".m2v"), key=lambda path: path.stat().st_mtime)
     total = sum(path.stat().st_size for path in videos)
     freed = 0
@@ -121,7 +128,10 @@ def _entries(work_dir: Path, suffix: str) -> list[Path]:
     return [
         path
         for path in folder.iterdir()
-        if NAME.match(path.name) and path.suffix == suffix and not path.is_symlink()
+        if NAME.match(path.name)
+        and path.suffix == suffix
+        and not path.is_symlink()
+        and path.is_file()
     ]
 
 

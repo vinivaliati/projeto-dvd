@@ -163,7 +163,9 @@ def resume_job(request: Request, job_id: int, session: SessionDep, settings: Set
 @router.post("/cache/clean", name="clean_cache")
 def clean_cache(request: Request, session: SessionDep, settings: SettingsDep) -> Response:
     if store.active_folders(session):
-        raise HTTPException(status_code=409)
+        page = ('<p class="banner banner-error" role="alert">Há um job gerando um disco. Espere '
+                'o job terminar para limpar o cache. <a href="/jobs">Voltar</a></p>')  # fmt: skip
+        return HTMLResponse(page, status_code=409)
     cache.clean(settings.work_dir)
     return RedirectResponse(request.url_for("jobs").path, status_code=303)
 

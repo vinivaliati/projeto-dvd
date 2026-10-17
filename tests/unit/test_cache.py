@@ -158,3 +158,19 @@ def test_the_cache_limit_cannot_be_negative(tmp_path: Path) -> None:
     assert Settings(cache_limit_gb=0).cache_limit_gb == 0
     with pytest.raises(ValidationError):
         Settings(cache_limit_gb=-1)
+
+
+def test_the_key_does_not_depend_on_the_position_of_the_title() -> None:
+    a, b = make_title_plan(), make_title_plan(path="Série/S01E02.mkv")
+
+    first = cache.cache_key(make_disc_plan(titles=(a, b)), 1, "7.1")
+    moved = cache.cache_key(make_disc_plan(titles=(b, a)), 2, "7.1")
+
+    assert first == moved
+
+
+def test_a_folder_with_a_cache_name_is_not_an_entry(tmp_path: Path) -> None:
+    (cache.cache_dir(tmp_path) / f"{'d' * 64}.m2v").mkdir(parents=True)
+
+    assert cache.cache_bytes(tmp_path) == 0
+    assert cache.evict(tmp_path, 0, keep=()) == 0
