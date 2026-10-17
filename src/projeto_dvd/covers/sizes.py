@@ -44,3 +44,8 @@ class LabelSheet:
 
 def px(mm: float, dpi: int) -> int:
     return round(mm * dpi / MM_PER_INCH)
+
+
+CASE = CaseSize()
+MARKS = Marks()
+LABELS = LabelSheet()
