@@ -3,7 +3,7 @@
 {% block content %}
 <a class="back" href="{{ url_for('jobs') }}">← Jobs</a>
 <h1>DVD de <span class="folder-name">{{ view.job.folder }}</span></h1>
-<p class="muted">{{ view.profile_name }} · job #{{ view.job.id }}</p>
+<p class="muted">{{ view.profile_name }} · {{ view.plan.titles | length }} título{{ "s" if view.plan.titles | length != 1 }} · job #{{ view.job.id }}</p>
 {% include "_job_status.html" %}
 <details class="log" hx-get="{{ url_for('job_log', job_id=view.job.id) }}"
          hx-trigger="toggle once" hx-target="find .log-text" hx-swap="innerHTML">

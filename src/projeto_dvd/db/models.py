@@ -79,3 +79,15 @@ class Title(SQLModel, table=True):
     poster_path: str | None = None  # TMDB path, for the thumbnail
     message: str | None = None  # warning or the reason of not_found (Portuguese)
     tmdb_json: str | None = None  # stored details (Details), only when confirmed
+
+
+class DiscProject(SQLModel, table=True):
+    """The Montar DVD choices of one disc folder (a DiscChoices as JSON).
+
+    No foreign key to media_file: a rescan must not delete the project.
+    """
+
+    __tablename__ = "disc_project"
+
+    folder: str = Field(primary_key=True)
+    choices_json: str

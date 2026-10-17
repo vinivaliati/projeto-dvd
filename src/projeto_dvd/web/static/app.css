@@ -303,3 +303,36 @@ input[type="radio"], input[type="checkbox"] { accent-color: var(--text); }
 footer.credits { max-width: 1100px; margin: 32px auto 16px; padding: 0 16px; font-size: 0.8rem;
   display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; }
 footer.credits img { display: block; height: 12px; width: auto; }
+
+/* Montar DVD */
+.dvd-form h3 { font-size: 0.95rem; margin: 16px 0 4px; }
+.kind { display: flex; flex-wrap: wrap; gap: 4px 16px; margin-bottom: 8px; }
+.disc-titles { margin: 0; padding-left: 28px; }
+.disc-title { display: flex; align-items: center; gap: 12px; padding: 8px 0;
+  border-bottom: 1px solid var(--border); }
+.disc-title:last-child { border-bottom: 0; }
+.disc-title-text { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0;
+  overflow-wrap: anywhere; }
+.disc-title-text .badge { align-self: flex-start; }
+.move { display: flex; gap: 4px; flex-shrink: 0; }
+.move .button { min-width: 44px; min-height: 44px; }
+.menu-grid { display: grid; gap: 16px; }
+@media (min-width: 900px) {
+  .menu-grid { grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); align-items: start; }
+  .menu-preview { position: sticky; top: 16px; }
+}
+.menu-preview { margin: 0; }
+.menu-preview img { display: block; width: 100%; height: auto; border-radius: var(--radius);
+  background: #000; }
+.htmx-request .menu-preview img, .menu-preview.htmx-request img { opacity: 0.5; }
+.choice-row { display: flex; flex-wrap: wrap; gap: 4px 16px; }
+.choice-column { display: flex; flex-direction: column; gap: 4px; overflow-wrap: anywhere; }
+.swatches { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 8px; }
+.swatch-option { display: flex; align-items: center; gap: 8px; }
+.swatch { display: inline-block; width: 44px; height: 44px; border-radius: var(--radius);
+  border: 2px solid var(--border); flex-shrink: 0; }
+.swatch-option input:checked + .swatch { border-color: var(--text); box-shadow: 0 0 0 2px var(--bg) inset; }
+.disc-bar { position: sticky; bottom: 0; display: flex; flex-wrap: wrap; justify-content: space-between;
+  gap: 4px 16px; padding: 8px 16px; margin: 16px -16px 0; background: var(--surface);
+  border-top: 1px solid var(--border); }

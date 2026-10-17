@@ -7,11 +7,11 @@ from sqlmodel import Session
 
 from projeto_dvd.jobs import store
 from projeto_dvd.jobs.store import ActiveJobError, JobStatus
-from tests.plans import make_plan
+from tests.plans import make_movie
 
 
 def enqueue(session: Session, folder: str = "Filme") -> int:
-    return store.enqueue(session, make_plan(folder=folder))
+    return store.enqueue(session, make_movie(folder=folder))
 
 
 def status(engine: Engine, job_id: int) -> str:
@@ -27,7 +27,7 @@ def test_enqueue_stores_the_plan(session: Session) -> None:
     job = store.get_job(session, job_id)
     assert job is not None
     assert (job.folder, job.status, job.progress) == ("Filme", "queued", 0.0)
-    assert job.plan_json == make_plan().model_dump_json()
+    assert job.plan_json == make_movie().model_dump_json()
 
 
 def test_one_active_job_per_folder(session: Session) -> None:

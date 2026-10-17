@@ -1,66 +1,105 @@
 {% extends "base.html" %}
-{% block title %}Gerar DVD · {{ source.folder }}{% endblock %}
+{% block title %}Montar DVD · {{ disc.name }}{% endblock %}
 {% block content %}
-<a class="back" href="{{ url_for('folder', name=source.folder | urlencode) }}">← {{ source.folder }}</a>
-<h1>Gerar DVD de <span class="folder-name">{{ source.folder }}</span></h1>
-<p class="muted">Entrada: {{ video | input_label }}, {{ source.summary.duration | duration }}</p>
-<p class="muted">Saída: DVD NTSC {{ shape.aspect }}{% if shape.height < 480 %} com faixas pretas (o filme é {{ video.aspect | aspect }}){% elif shape.width < 720 %} com faixas laterais{% endif %}. A geração leva {{ source.summary.duration | encode_time(video.height > 576) }}.</p>
+<a class="back" href="{{ url_for('folder', name=disc.name | urlencode) }}">← {{ disc.name }}</a>
+<h1>Montar DVD de <span class="folder-name">{{ disc.name }}</span></h1>
+<p class="muted">{{ ordered | length }} título{{ "s" if ordered | length != 1 }}. Ao colocar o disco, o menu abre; tudo que você muda aqui fica salvo. A geração leva {{ encode_seconds | remaining }}.</p>
+{% if frame_scan %}
+<p class="banner">Esta pasta tem rip de DVD: ao clicar em Gerar, o app examina os quadros de cada um, e isso pode levar alguns minutos antes de o job começar.</p>
+{% endif %}
 {% if errors %}
 <div class="banner banner-error" role="alert"><ul>{% for error in errors %}<li>{{ error }}</li>{% endfor %}</ul></div>
 {% endif %}
-<form method="post" action="{{ url_for('create_dvd', name=source.folder | urlencode) }}" class="dvd-form">
-<div hx-post="{{ url_for('dvd_estimate', name=source.folder | urlencode) }}" hx-trigger="change"
-     hx-target="#profiles" hx-swap="outerHTML" hx-include="closest form">
+<form method="post" action="{{ url_for('create_dvd', name=disc.name | urlencode) }}" class="dvd-form" id="disc-form">
+<div id="disc-choices" hx-post="{{ url_for('dvd_choices', name=disc.name | urlencode) }}" hx-trigger="change"
+     hx-include="#disc-form" hx-swap="none" hx-sync="#disc-form:queue all">
   <fieldset>
-    <legend>Áudio</legend>
-    {% for track in source.summary.audio %}
-    {% set out = outputs[track.index] %}
-    <div class="track">
-      <label><input type="checkbox" name="audio" value="{{ track.index }}"{% if track.index in choices.audio %} checked{% endif %}{% if errors and "áudio" in errors | join %} aria-invalid="true"{% endif %}>
-        {{ track.language | language }} · {{ track | channels }} · {{ track.codec | audio_codec }}{% if track.title %} · {{ track.title }}{% endif %}{% if track.default %} <span class="badge">padrão no arquivo</span>{% endif %}</label>
-      <span class="muted">{% if out.action == "copy" %}copiar sem perda{% else %}converter para Dolby Digital {{ "5.1" if out.channels == 6 else out.channels ~ " canais" if out.channels > 2 else "estéreo" if out.channels == 2 else "mono" }} ({{ out.kbps }} kbps){% if track.codec == "ac3" %}, porque o original não segue o padrão do DVD{% endif %}{% endif %}</span>
-      <label class="radio"><input type="radio" name="first_audio" value="{{ track.index }}"{% if track.index == choices.first_audio %} checked{% endif %}{% if errors and "toca ao colocar" in errors | join %} aria-invalid="true"{% endif %}> Toca ao colocar o disco</label>
+    <legend>Títulos</legend>
+    <div class="kind" role="radiogroup" aria-label="Tipo do disco">
+      <label class="radio"><input type="radio" name="kind" value="movies"{% if choices.kind == "movies" %} checked{% endif %}> Filmes</label>
+      <label class="radio"><input type="radio" name="kind" value="series"{% if choices.kind == "series" %} checked{% endif %}> Série (com "Tocar todos" e lista de episódios)</label>
     </div>
-    {% endfor %}
-    <p class="muted">As outras faixas trocam pelo botão Áudio do controle.</p>
+    {% include "_disc_titles.html" %}
   </fieldset>
   <fieldset>
-    <legend>Legendas</legend>
-    {% for option in source.options %}
-    <div class="track{% if not option.supported %} unsupported{% endif %}">
-      {% if option.supported %}
-      <label><input type="checkbox" name="subtitle" value="{{ option.key }}"{% if option.key in choices.subtitles %} checked{% endif %}>
-        {{ option.language_tag | language }}{% if option.title %} · {{ option.title }}{% endif %}{% if option.forced %} <span class="badge">forçada</span>{% endif %}{% if option.default %} <span class="badge">padrão no arquivo</span>{% endif %}</label>
-      <label class="radio"><input type="radio" name="subtitle_on" value="{{ option.key }}"{% if option.key == choices.subtitle_on %} checked{% endif %}{% if errors and "legenda ligada" in errors | join %} aria-invalid="true"{% endif %}> Ligada ao iniciar</label>
-      {% else %}
-      <span>{{ option.language_tag | language }}{% if option.title %} · {{ option.title }}{% endif %}</span>
-      <span class="muted">{{ option.reason }}</span>
-      {% endif %}
+    <legend>Idiomas</legend>
+    <p class="muted">Valem para o disco todo. O app escolhe em cada título a melhor faixa de cada idioma.</p>
+    <h3>Áudio</h3>
+    {% for lang in audio_languages %}
+    <div class="track">
+      <label><input type="checkbox" name="audio" value="{{ lang }}"{% if lang in choices.audio %} checked{% endif %}> {{ language_name(lang) }}</label>
+      <label class="radio"><input type="radio" name="first_audio" value="{{ lang }}"{% if choices.audio and choices.audio[0] == lang %} checked{% endif %} onchange="this.closest('.track').querySelector('input[type=checkbox]').checked = true"> Toca primeiro</label>
+    </div>
+    {% endfor %}
+    <h3>Legendas</h3>
+    {% for lang in subtitle_languages %}
+    <div class="track">
+      <label><input type="checkbox" name="subtitle" value="{{ lang }}"{% if lang in choices.subtitles %} checked{% endif %}> {{ language_name(lang) }}</label>
+      <label class="radio"><input type="radio" name="subtitle_on" value="{{ lang }}"{% if choices.subtitle_on == lang %} checked{% endif %} onchange="this.closest('.track').querySelector('input[type=checkbox]').checked = true"> Ligada ao iniciar</label>
     </div>
     {% else %}
-    <p class="muted">O vídeo não tem legendas. Para incluir uma, coloque um .srt ao lado dele e escaneie de novo.</p>
+    <p class="muted">Nenhum vídeo tem legenda em texto. Para incluir uma, coloque um .srt ao lado do vídeo e escaneie de novo.</p>
     {% endfor %}
-    {% if source.options %}
-    <label class="radio"><input type="radio" name="subtitle_on" value=""{% if choices.subtitle_on is none %} checked{% endif %}> Nenhuma (liga pelo botão Legenda do controle)</label>
+    {% if subtitle_languages %}
+    <label class="radio"><input type="radio" name="subtitle_on" value=""{% if choices.subtitle_on is none %} checked{% endif %}> Nenhuma ligada ao iniciar</label>
     {% endif %}
+    {% include "_disc_warnings.html" %}
+  </fieldset>
+  <fieldset>
+    <legend>Menu</legend>
+    <div class="menu-grid">
+      {% include "_menu_preview.html" %}
+      <div class="menu-controls">
+        <h3>Página</h3>
+        <div class="choice-row">
+          {% for page_name in page_names %}
+          <label class="radio"><input type="radio" name="preview_page" value="{{ loop.index0 }}"{% if loop.index0 == preview_page %} checked{% endif %}> {{ page_name }}</label>
+          {% endfor %}
+        </div>
+        <h3>Fundo</h3>
+        <div class="choice-column">
+          <label class="radio"><input type="radio" name="backdrop" value=""{% if choices.theme.backdrop is none %} checked{% endif %}> Sem arte (fundo escuro)</label>
+          {% for name in disc.backdrops %}
+          <label class="radio"><input type="radio" name="backdrop" value="{{ name }}"{% if choices.theme.backdrop == name %} checked{% endif %}> {{ name }}</label>
+          {% else %}
+          <p class="muted">Sem artes do TMDB nesta pasta. Confirme os títulos no TMDB para usar o fundo de um deles.</p>
+          {% endfor %}
+        </div>
+        <h3>Cor de destaque</h3>
+        <div class="swatches">
+          <label class="swatch-option"><input type="radio" name="accent" value="auto"{% if choices.theme.accent == "auto" %} checked{% endif %}>
+            <span class="swatch" style="background: {{ palette[auto_key][1] }}"></span> Automática</label>
+          {% for key, (label, color) in palette.items() %}
+          <label class="swatch-option"><input type="radio" name="accent" value="{{ key }}"{% if choices.theme.accent == key %} checked{% endif %}>
+            <span class="swatch" style="background: {{ color }}"></span> {{ label }}{% if key == auto_key %} <span class="badge">do fundo</span>{% endif %}</label>
+          {% endfor %}
+        </div>
+        <h3>Botões</h3>
+        <div class="choice-row">
+          <label class="radio"><input type="radio" name="side" value="left"{% if choices.theme.side == "left" %} checked{% endif %}> À esquerda</label>
+          <label class="radio"><input type="radio" name="side" value="right"{% if choices.theme.side == "right" %} checked{% endif %}> À direita</label>
+        </div>
+      </div>
+    </div>
   </fieldset>
   <fieldset>
     <legend>Capítulos</legend>
-    <label class="radio"><input type="radio" name="chapters" value="file"{% if choices.chapters == "file" %} checked{% endif %}{% if source.summary.chapters | length < 2 %} disabled{% endif %}>
-      Do arquivo{% if source.summary.chapters | length < 2 %} <span class="muted">(o arquivo não tem capítulos)</span>{% else %} ({{ source.summary.chapters | length }}){% endif %}</label>
+    <label class="radio"><input type="radio" name="chapters" value="file"{% if choices.chapters == "file" %} checked{% endif %}>
+      Os do arquivo <span class="muted">(quem não tiver ganha um a cada {{ choices.minutes }} minutos)</span></label>
     <label class="radio"><input type="radio" name="chapters" value="every"{% if choices.chapters == "every" %} checked{% endif %}>
-      A cada <input type="number" name="minutes" min="1" max="60" value="{{ choices.minutes }}" class="minutes"{% if errors and "capítulos" in errors | join %} aria-invalid="true"{% endif %}> minutos</label>
-    {% if chapters.note %}<p class="muted">{{ chapters.note }}</p>{% endif %}
+      A cada <input type="number" name="minutes" min="1" max="60" value="{{ choices.minutes }}" class="minutes"> minutos</label>
   </fieldset>
   <fieldset>
     <legend>Disco</legend>
     {% include "_profile_cards.html" %}
   </fieldset>
 </div>
+  {% include "_disc_confirm.html" %}
   {% if existing %}
-  <label class="confirm"><input type="checkbox" name="replace_iso" value="1"{% if choices.replace_iso %} checked{% endif %}>
+  <label class="confirm"><input type="checkbox" name="replace_iso" value="1"{% if replace_iso %} checked{% endif %}>
     Substituir o ISO existente ({{ existing.stat().st_size | size }})</label>
   {% endif %}
   <p class="actions"><button class="button primary" type="submit">Gerar DVD</button></p>
 </form>
+{% include "_disc_bar.html" %}
 {% endblock %}

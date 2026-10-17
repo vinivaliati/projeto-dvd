@@ -9,7 +9,7 @@ from pathlib import Path
 
 from sqlmodel import Session, col, select
 
-from projeto_dvd.db.models import MediaFile
+from projeto_dvd.db.models import DiscProject, MediaFile
 from projeto_dvd.library.files import VideoFile, find_videos
 from projeto_dvd.library.probe import READ_ERROR, ProbeResult, Summary, summarize
 
@@ -89,10 +89,12 @@ def scan_folder(session: Session, media_dir: Path, name: str, folder: Path, prob
 
 
 def purge_missing_folders(session: Session, names: Iterable[str]) -> None:
-    """Delete rows of disc folders that no longer exist."""
-    stale = select(MediaFile).where(col(MediaFile.folder).not_in(list(names)))
-    for row in session.exec(stale).all():
+    """Delete rows and disc projects of disc folders that no longer exist."""
+    kept = list(names)
+    for row in session.exec(select(MediaFile).where(col(MediaFile.folder).not_in(kept))).all():
         session.delete(row)
+    for project in session.exec(select(DiscProject).where(col(DiscProject.folder).not_in(kept))):
+        session.delete(project)
     session.commit()
 
 

@@ -15,9 +15,9 @@ from projeto_dvd.config import Settings
 from projeto_dvd.db.models import Job
 from projeto_dvd.jobs import store
 from projeto_dvd.jobs.files import clean_job_dir, log_tail, temporary_bytes
-from projeto_dvd.jobs.pipeline import STEP_LABELS, Step
+from projeto_dvd.jobs.pipeline import DISC_STEPS, STEP_LABELS, TITLE_STEPS, Step
 from projeto_dvd.jobs.store import ACTIVE, JobStatus
-from projeto_dvd.planner.dvd_plan import DvdPlan
+from projeto_dvd.planner.disc_plan import DiscPlan, TitlePlan
 from projeto_dvd.planner.profiles import PROFILES
 from projeto_dvd.planner.source import VideoMode
 
@@ -35,7 +35,7 @@ class StepView:
 @dataclass(frozen=True)
 class JobView:
     job: Job
-    plan: DvdPlan
+    plan: DiscPlan
     profile_name: str
     steps: tuple[StepView, ...]
     percent: int
@@ -54,7 +54,7 @@ class JobView:
 
 def job_view(session: Session, settings: Settings, job: Job, now: datetime) -> JobView:
     assert job.id is not None
-    plan = DvdPlan.model_validate_json(job.plan_json)
+    plan = DiscPlan.model_validate_json(job.plan_json)
     started = job.started_at
     elapsed = (now - started).total_seconds() if started else None
     remaining = None
@@ -81,7 +81,7 @@ def job_view(session: Session, settings: Settings, job: Job, now: datetime) -> J
 
 @router.get("/jobs", response_class=HTMLResponse, name="jobs")
 def jobs_page(request: Request, session: SessionDep) -> HTMLResponse:
-    jobs = [(job, DvdPlan.model_validate_json(job.plan_json)) for job in store.list_jobs(session)]
+    jobs = [(job, DiscPlan.model_validate_json(job.plan_json)) for job in store.list_jobs(session)]
     context = {"jobs": jobs, "profiles": PROFILES, "now": _now()}
     return templates.TemplateResponse(request, "jobs.html", context)
 
@@ -133,22 +133,57 @@ def _job(session: Session, job_id: int) -> Job:
     return job
 
 
-def _steps(plan: DvdPlan, job: Job) -> tuple[StepView, ...]:
-    shown = [
-        step for step in Step
-        if not (step == Step.PULLDOWN and plan.mode != VideoMode.FILM)
-        and not (step == Step.SUBTITLES and not plan.subtitles)
-    ]  # fmt: skip
+def _steps(plan: DiscPlan, job: Job) -> tuple[StepView, ...]:
+    """The steps of the job. With several titles, only the current one is expanded; the
+    others show as one line each, so a 24-episode disc does not list 144 steps."""
+    rows = [(n, step) for n, title in enumerate(plan.titles, 1) for step in _title_steps(title)]
+    rows += [(0, step) for step in DISC_STEPS if step != Step.MENUS or plan.menu is not None]
     if job.status == JobStatus.DONE:
-        return tuple(StepView(STEP_LABELS[step], "done") for step in shown)
-    current = shown.index(Step(job.step)) if job.step in {s.value for s in shown} else -1
-    if job.status == JobStatus.QUEUED:
+        current = len(rows)
+    elif job.status == JobStatus.QUEUED:
         current = -1
-    return tuple(
-        StepView(STEP_LABELS[step], "done" if i < current else "current" if i == current
-                 else "todo")
-        for i, step in enumerate(shown)
-    )  # fmt: skip
+    else:
+        current = next((i for i, row in enumerate(rows) if row == _parse_step(job.step)), -1)
+    count = len(plan.titles)
+    focus = rows[current][0] if 0 <= current < len(rows) else 0
+    views: list[StepView] = []
+    for n in range(1, count + 1):
+        indices = [i for i, row in enumerate(rows) if row[0] == n]
+        if count > 1 and n != focus:
+            views.append(StepView(f"Título {n} de {count}", _state(indices, current)))
+            continue
+        prefix = f"Título {n} de {count} · " if count > 1 else ""
+        views += [StepView(prefix + STEP_LABELS[rows[i][1]], _state([i], current)) for i in indices]
+    views += [StepView(STEP_LABELS[step], _state([i], current))
+              for i, (n, step) in enumerate(rows) if n == 0]  # fmt: skip
+    return tuple(views)
+
+
+def _title_steps(title: TitlePlan) -> list[Step]:
+    return [
+        step for step in TITLE_STEPS
+        if not (step == Step.PULLDOWN and title.mode != VideoMode.FILM)
+        and not (step == Step.SUBTITLES and not title.subtitles)
+    ]  # fmt: skip
+
+
+def _parse_step(text: str | None) -> tuple[int, Step] | None:
+    """'2:video_pass2', or a phase 3 job's bare step (its only title)."""
+    if not text:
+        return None
+    title, _, name = text.rpartition(":")
+    if name not in {s.value for s in Step}:
+        return None
+    step = Step(name)
+    return (int(title) if title else (1 if step in TITLE_STEPS else 0)), step
+
+
+def _state(indices: list[int], current: int) -> Literal["done", "current", "todo"]:
+    if all(i < current for i in indices):
+        return "done"
+    if current in indices:
+        return "current"
+    return "todo"
 
 
 def _iso_display(settings: Settings, iso_name: str) -> str:

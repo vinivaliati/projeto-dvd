@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from sqlmodel import Session, select
 
-from projeto_dvd.db.models import MediaFile, Title
+from projeto_dvd.db.models import DiscProject, MediaFile, Title
 from projeto_dvd.library.probe import NO_VIDEO, READ_ERROR, FfprobeMissingError, ProbeResult
 from projeto_dvd.library.scan import (
     CHANGED_FILE,
@@ -214,6 +214,16 @@ def test_purge_removes_rows_of_folders_that_are_gone(session: Session, media: Pa
     purge_missing_folders(session, ["Disco"])
 
     assert sorted(rows(session)) == ["Disco/a.mkv", "Disco/b.mkv"]
+
+
+def test_purge_removes_disc_projects_of_folders_that_are_gone(session: Session) -> None:
+    session.add(DiscProject(folder="Disco", choices_json="{}"))
+    session.add(DiscProject(folder="Outro", choices_json="{}"))
+    session.commit()
+
+    purge_missing_folders(session, ["Disco"])
+
+    assert [p.folder for p in session.exec(select(DiscProject)).all()] == ["Disco"]
 
 
 # Read-only

@@ -8,7 +8,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, col, select
 
 from projeto_dvd.db.models import Job
-from projeto_dvd.planner.dvd_plan import DvdPlan
+from projeto_dvd.planner.disc_plan import DiscPlan
 
 
 class JobStatus(StrEnum):
@@ -94,7 +94,7 @@ FAIL_INTERRUPTED = text(
 ).bindparams(bindparam("now", type_=DateTime()))
 
 
-def enqueue(session: Session, plan: DvdPlan) -> int:
+def enqueue(session: Session, plan: DiscPlan) -> int:
     job = Job(folder=plan.folder, plan_json=plan.model_dump_json(), created_at=_now())
     session.add(job)
     try:

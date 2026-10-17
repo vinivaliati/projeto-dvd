@@ -1,20 +1,28 @@
-"""The one video of a disc folder, ready to plan: shared by the web form and the dev command."""
+"""The disc of a folder as the screens and the job see it: what blocks it, the titles ready to
+encode and the suggested plan (shared by the web page and the dev command)."""
 
 import subprocess
 from collections.abc import Callable
-from dataclasses import dataclass
-from typing import Any
+from datetime import date
+from pathlib import Path
 
-from projeto_dvd.library.files import VideoFile
-from projeto_dvd.library.probe import Summary
-from projeto_dvd.library.scan import FolderView, Status
-from projeto_dvd.planner.dvd_plan import (
-    DvdPlan,
-    SubtitleOption,
-    build_plan,
-    subtitle_options,
-    suggest_choices,
+from PIL import Image
+from sqlmodel import Session
+
+from projeto_dvd.library.scan import FolderView, Status, folder_view
+from projeto_dvd.menus.theme import available_backdrops, backdrop_path
+from projeto_dvd.metadata.curation import confirmed_infos
+from projeto_dvd.planner.disc import DiscTitle, disc_titles, suggest_choices
+from projeto_dvd.planner.disc_build import (
+    TitleSource,
+    build_disc_plan,
+    disc_errors,
+    disc_estimates,
+    menu_plan,
+    profile_for,
 )
+from projeto_dvd.planner.disc_plan import DiscChoices, DiscPlan, MenuPlan
+from projeto_dvd.planner.profiles import PROFILES
 from projeto_dvd.planner.source import (
     FRAMES_UNREADABLE,
     VideoMode,
@@ -26,55 +34,55 @@ from projeto_dvd.planner.source import (
 
 SCAN_FIRST = "Escaneie a pasta antes de gerar o disco."
 CHANGED = "Os arquivos mudaram desde o último scan. Escaneie de novo."
-ONE_VIDEO = (
-    "Por enquanto o app gera disco com um vídeo só (discos com vários vídeos chegam com o "
-    "menu). Para gerar agora, coloque cada vídeo numa pasta própria."
-)
 READ_ERROR = (
-    "Não foi possível ler o arquivo. Escaneie de novo; se continuar, o arquivo pode estar "
+    "não foi possível ler o arquivo. Escaneie de novo; se continuar, o arquivo pode estar "
     "danificado."
 )
 FRAME_SCAN_TIMEOUT = 120
-
-
-@dataclass(frozen=True)
-class DiscSource:
-    folder: str
-    video: VideoFile
-    summary: Summary
-    options: list[SubtitleOption]
-    mode: VideoMode
-    top_field_first: bool
+Capture = Callable[[list[str]], str]
 
 
 def folder_reasons(view: FolderView) -> tuple[str, ...]:
-    """Folder-level reasons; an empty folder has none (the screen shows no DVD block)."""
+    """What blocks the disc; an empty folder has none (the screen shows no DVD block)."""
     if view.status == Status.EMPTY:
         return ()
     if view.status == Status.NOT_SCANNED:
         return (SCAN_FIRST,)
     if view.status == Status.CHANGED:
         return (CHANGED,)
-    if len(view.files) != 1:
-        return (ONE_VIDEO,)
-    file = view.files[0]
-    if file.error is not None:
-        return (READ_ERROR,)
-    if file.summary is None:
-        return (SCAN_FIRST,)
-    return check_video(file.summary).reasons
+    reasons: list[str] = []
+    for file in view.files:
+        name = file.video.path.split("/", 1)[1]
+        if file.error is not None:
+            reasons.append(f"{name}: {READ_ERROR}")
+        elif file.summary is None:
+            reasons.append(SCAN_FIRST)
+        else:
+            reasons += [f"{name}: {reason}" for reason in check_video(file.summary).reasons]
+    return tuple(dict.fromkeys(reasons))
 
 
-def prepare(
-    folder: str, video: VideoFile, summary: Summary, capture: Callable[[list[str]], str]
-) -> DiscSource | tuple[str, ...]:
-    check = check_video(summary)
+def load_disc(
+    session: Session, media_dir: Path, name: str, folder: Path
+) -> tuple[FolderView, tuple[DiscTitle, ...]]:
+    view = folder_view(session, media_dir, name, folder)
+    infos = confirmed_infos(session, name)
+    return view, disc_titles(view, infos, date.today().year + 1)
+
+
+def suggestion(titles: tuple[DiscTitle, ...], folder: str) -> DiscChoices:
+    return suggest_choices(titles, folder, profile_for(titles, folder))
+
+
+def prepare_title(title: DiscTitle, capture: Capture) -> TitleSource | tuple[str, ...]:
+    """The video mode, with the frame scan of MPEG-2 rips (up to 2 minutes each)."""
+    check = check_video(title.summary)
     if check.reasons:
         return check.reasons
     mode, top_field_first = check.mode, check.top_field_first
     if check.needs_frame_scan:
         try:
-            frames = capture(frame_scan_command(video.absolute, summary.duration or 0.0))
+            frames = capture(frame_scan_command(title.video.absolute, title.summary.duration or 0))
         except (OSError, subprocess.SubprocessError):
             return (FRAMES_UNREADABLE,)
         result = classify_frames(frames)
@@ -82,8 +90,7 @@ def prepare(
             return (result,)
         mode, top_field_first = result, top_field_first_from_frames(frames)
     assert mode is not None
-    options = subtitle_options(summary, video.subtitles)
-    return DiscSource(folder, video, summary, options, mode, top_field_first)
+    return TitleSource(title, mode, top_field_first)
 
 
 def run_capture(command: list[str]) -> str:
@@ -94,13 +101,51 @@ def run_capture(command: list[str]) -> str:
     return result.stdout
 
 
-def suggested_plan(source: DiscSource, **choice_overrides: Any) -> DvdPlan:
-    duration = source.summary.duration or 0.0
-    choices = suggest_choices(source.summary, source.options, duration)
-    if choice_overrides:
-        choices = choices.model_copy(update=choice_overrides)
-    return build_plan(
-        folder=source.folder, path=source.video.path, size=source.video.size,
-        mtime_ns=source.video.mtime_ns, summary=source.summary, options=source.options,
-        choices=choices, mode=source.mode, top_field_first=source.top_field_first,
-    )  # fmt: skip
+def theme_image(
+    choices: DiscChoices, folder: str, output_dir: Path
+) -> tuple[Path | None, Image.Image | None]:
+    """The chosen backdrop and its picture; one that cannot be read counts as none."""
+    name = choices.theme.backdrop
+    if name is None or name not in available_backdrops(output_dir, folder):
+        return None, None
+    path = backdrop_path(output_dir, folder, name)
+    try:
+        with Image.open(path) as opened:
+            return path, opened.convert("RGB")
+    except OSError:
+        return None, None
+
+
+def disc_menu(
+    choices: DiscChoices, titles: tuple[DiscTitle, ...], folder: str, output_dir: Path
+) -> MenuPlan:
+    path, image = theme_image(choices, folder, output_dir)
+    return menu_plan(choices, titles, folder, path, image)
+
+
+def suggested_disc_plan(
+    session: Session, media_dir: Path, output_dir: Path, name: str, folder: Path,
+    capture: Capture,
+) -> DiscPlan | tuple[str, ...]:  # fmt: skip
+    """The disc with every suggestion taken and the low quality accepted (dev command, tests)."""
+    view, titles = load_disc(session, media_dir, name, folder)
+    reasons = folder_reasons(view)
+    if reasons or not titles:
+        return reasons or ("Nada para gerar.",)
+    choices = suggestion(titles, name)
+    backdrops = available_backdrops(output_dir, name)
+    if backdrops:
+        theme = choices.theme.model_copy(update={"backdrop": backdrops[0]})
+        choices = choices.model_copy(update={"theme": theme})
+    sources = [prepare_title(title, capture) for title in titles]
+    problems = [reason for s in sources if isinstance(s, tuple) for reason in s]
+    if problems:
+        return tuple(problems)
+    estimate = next(e for e in disc_estimates(choices, titles, name)
+                    if e.profile is PROFILES[choices.profile])  # fmt: skip
+    errors = disc_errors(choices, titles, estimate, confirm_low=True)
+    if errors:
+        return tuple(errors)
+    menu = disc_menu(choices, titles, name, output_dir)
+    ready = [s for s in sources if isinstance(s, TitleSource)]
+    return build_disc_plan(name, ready, choices, menu, confirm_low=True, replace_iso=True)

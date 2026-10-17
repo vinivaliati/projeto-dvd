@@ -8,20 +8,21 @@ from projeto_dvd.encode.mpeg2 import StreamReport
 from projeto_dvd.jobs.runner import RunResult
 from projeto_dvd.planner.dvd_plan import SubtitleChoice
 from projeto_dvd.planner.profiles import DVD9
-from tests.plans import make_plan
+from tests.plans import make_movie, movie_title
 from tests.tree import make_file
 
-PLAN = make_plan()
+DISC = make_movie()
+PLAN = movie_title()
 
 
 def test_size_fails_above_the_media_and_warns_above_the_margin() -> None:
-    fits, margin = qa.size_checks(int(DVD9.capacity_bytes * 0.5), PLAN)
+    fits, margin = qa.size_checks(int(DVD9.capacity_bytes * 0.5), DISC)
     assert fits.ok and margin.ok and not margin.warning
 
-    fits, margin = qa.size_checks(int(DVD9.capacity_bytes * 0.98), PLAN)
+    fits, margin = qa.size_checks(int(DVD9.capacity_bytes * 0.98), DISC)
     assert fits.ok and margin.ok and margin.warning
 
-    fits, _ = qa.size_checks(DVD9.capacity_bytes + 1, PLAN)
+    fits, _ = qa.size_checks(DVD9.capacity_bytes + 1, DISC)
     assert not fits.ok
 
 
@@ -42,9 +43,17 @@ LISTING = "\n".join([
 
 
 def test_tree_check() -> None:
-    assert qa.tree_check(LISTING).ok
-    broken = qa.tree_check(LISTING.replace("/VIDEO_TS/VTS_01_0.IFO;1", ""))
+    one = qa.required_tree(1, menus=False)
+    assert qa.tree_check(LISTING, one).ok
+    broken = qa.tree_check(LISTING.replace("/VIDEO_TS/VTS_01_0.IFO;1", ""), one)
     assert not broken.ok and "VTS_01_0.IFO" in broken.detail
+
+
+def test_the_tree_needs_every_titleset_and_the_menus() -> None:
+    tree = qa.required_tree(2, menus=True)
+    assert "/VIDEO_TS/VIDEO_TS.VOB" in tree and "/VIDEO_TS/VTS_02_1.VOB" in tree
+    check = qa.tree_check(LISTING, tree)
+    assert not check.ok and "VIDEO_TS.VOB" in check.detail and "VTS_02_0.IFO" in check.detail
 
 
 def probe(**changes: Any) -> dict[str, Any]:
@@ -93,8 +102,8 @@ def test_stream_failures(mutate: Any, name: str) -> None:
 
 
 def test_subtitles_must_have_packets() -> None:
-    plan = make_plan(subtitles=(SubtitleChoice(key="s3", stream_index=3, file=None,
-                                               language="pt"),))  # fmt: skip
+    plan = movie_title(subtitles=(SubtitleChoice(key="s3", stream_index=3, file=None,
+                                                language="pt"),))  # fmt: skip
     data = probe()
     data["streams"].append({"codec_type": "subtitle", "codec_name": "dvd_subtitle",
                             "tags": {"language": "por"}, "nb_read_packets": "0"})  # fmt: skip
@@ -111,13 +120,13 @@ def report(**fields: Any) -> StreamReport:
 
 
 def test_bitstream_checks() -> None:
-    assert failing(qa.bitstream_checks(report(), PLAN)) == []
-    assert failing(qa.bitstream_checks(report(frame_rate_codes={1}), PLAN)) == ["bitstream"]
-    assert failing(qa.bitstream_checks(report(progressive_sequence={1}), PLAN)) == ["bitstream"]
-    assert failing(qa.bitstream_checks(report(open_gops=1), PLAN)) == ["gop"]
-    assert failing(qa.bitstream_checks(report(max_gop=13), PLAN)) == ["gop"]
-    assert failing(qa.bitstream_checks(report(parity_breaks=2), PLAN)) == ["fields"]
-    assert failing(qa.bitstream_checks(report(aspect_codes={2}), PLAN)) == ["bitstream"]
+    assert failing(qa.bitstream_checks(report(), "16:9")) == []
+    assert failing(qa.bitstream_checks(report(frame_rate_codes={1}), "16:9")) == ["bitstream"]
+    assert failing(qa.bitstream_checks(report(progressive_sequence={1}), "16:9")) == ["bitstream"]
+    assert failing(qa.bitstream_checks(report(open_gops=1), "16:9")) == ["gop"]
+    assert failing(qa.bitstream_checks(report(max_gop=13), "16:9")) == ["gop"]
+    assert failing(qa.bitstream_checks(report(parity_breaks=2), "16:9")) == ["fields"]
+    assert failing(qa.bitstream_checks(report(aspect_codes={2}), "16:9")) == ["bitstream"]
 
 
 def packets(*items: tuple[int, float]) -> dict[str, Any]:
@@ -162,13 +171,15 @@ def test_decode_check() -> None:
 def test_commands() -> None:
     iso = Path("/w/disc.iso")
     assert qa.isoinfo_command(iso) == ["isoinfo", "-f", "-i", "/w/disc.iso"]
-    assert qa.dvd_probe_command(iso)[:9] == [
-        "ffprobe", "-v", "error", "-f", "dvdvideo", "-title", "1", "-count_packets",
+    assert qa.dvd_probe_command(iso, 2)[:9] == [
+        "ffprobe", "-v", "error", "-f", "dvdvideo", "-title", "2", "-count_packets",
         "-show_streams",
     ]  # fmt: skip
-    extract = qa.extract_video_command(iso, Path("/w/qa.m2v"))
+    extract = qa.extract_video_command(iso, Path("/w/qa.m2v"), 3)
     assert extract[extract.index("-map") + 1] == "0:v" and extract[-1] == "/w/qa.m2v"
-    decode = qa.decode_command(iso)
+    assert extract[extract.index("-title") + 1] == "3"
+    decode = qa.decode_command(iso, 2)
+    assert decode[decode.index("-title") + 1] == "2"
     assert decode[decode.index("-v") + 1] == "error"
     assert decode.count("-map") == 2 and decode[-3:] == ["-f", "null", "-"]
 
@@ -193,7 +204,34 @@ def test_sync_check_without_packets_fails() -> None:
 
 
 def test_a_single_chapter_is_not_listed_by_ffprobe() -> None:
-    plan = make_plan(chapters=(0.0,))
+    plan = movie_title(chapters=(0.0,))
 
     assert failing(qa.stream_checks(probe(chapters=[]), plan, 7200.0)) == []
     assert "chapters" in failing(qa.stream_checks(probe(chapters=[]), PLAN, 7200.0))
+
+
+def test_menu_commands_read_one_vmgm_pgc() -> None:
+    iso = Path("/w/disc.iso")
+    probe_menu = qa.menu_probe_command(iso, 4)
+    assert probe_menu[probe_menu.index("-pgc") + 1] == "4"
+    assert probe_menu[probe_menu.index("-menu_vts") + 1] == "0"
+    extract = qa.extract_menu_command(iso, Path("/w/m.m2v"), 3)
+    assert extract[extract.index("-pgc") + 1] == "3" and extract[-1] == "/w/m.m2v"
+
+
+def menu_probe(**video: Any) -> dict[str, Any]:
+    base = {"codec_type": "video", "codec_name": "mpeg2video", "width": 720, "height": 480,
+            "display_aspect_ratio": "16:9"}  # fmt: skip
+    base.update(video)
+    return {"streams": [base, {"codec_type": "audio", "codec_name": "ac3"}]}
+
+
+def test_menu_checks() -> None:
+    assert failing(qa.menu_checks(menu_probe(), "16:9")) == []
+    assert failing(qa.menu_checks(menu_probe(display_aspect_ratio="4:3"), "16:9")) == ["menu"]
+    assert failing(qa.menu_checks({"streams": []}, "16:9")) == ["menu"]
+
+
+def test_prefixed_checks_tell_titles_apart() -> None:
+    checks = qa.prefixed([qa.Check(name="video", label="Vídeo", ok=True)], "t2", "Título 2")
+    assert (checks[0].name, checks[0].label) == ("t2-video", "Título 2: Vídeo")

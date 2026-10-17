@@ -1,4 +1,4 @@
-<div id="profiles" class="profiles">
+<div id="profiles" class="profiles"{% if oob %} hx-swap-oob="true"{% endif %}>
   {% for item in estimates %}
   {% set p = item.profile %}
   {% set used = (item.size_bytes / p.capacity_bytes * 100) | round | int %}
@@ -13,9 +13,5 @@
     {% if choices.profile == p.key %}<span class="chosen-label">Escolhido</span>{% endif %}
   </label>
   {% endfor %}
-  <p class="muted help-line">A qualidade depende de quanto espaço sobra para a imagem. Ótima a partir de 5 Mbps.{% if suggested == "dvd9" %} A mídia de dupla camada é mais cara.{% endif %}</p>
-  {% if chosen and chosen.quality == "Baixa" %}
-  <label class="confirm"><input type="checkbox" name="confirm_low" value="1"{% if choices.confirm_low %} checked{% endif %}>
-    Entendo que a qualidade vai ficar baixa e quero gerar mesmo assim</label>
-  {% endif %}
+  <p class="muted help-line">A qualidade depende de quanto espaço sobra para a imagem, a mesma em todos os títulos. Ótima a partir de 5 Mbps.{% if suggested == "dvd9" %} A mídia de dupla camada é mais cara.{% endif %}</p>
 </div>

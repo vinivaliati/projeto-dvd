@@ -13,7 +13,7 @@ from projeto_dvd.jobs import store, worker
 from projeto_dvd.jobs.pipeline import PipelineError, PipelineResult, QaFailed, Step
 from projeto_dvd.jobs.runner import Canceled, ProcessRunner
 from projeto_dvd.jobs.worker import Worker
-from tests.plans import make_plan
+from tests.plans import make_movie
 from tests.tree import make_file
 
 
@@ -35,7 +35,7 @@ def job(engine: Engine, job_id: int) -> Any:
 
 
 def queue(session: Session, folder: str = "Filme") -> int:
-    return store.enqueue(session, make_plan(folder=folder))
+    return store.enqueue(session, make_movie(folder=folder))
 
 
 def fake_pipeline(monkeypatch: pytest.MonkeyPatch,
@@ -70,7 +70,7 @@ def test_done_job_keeps_the_iso_path_and_qa(engine: Engine, session: Session,
         '{"ok": 1}',
     )
     assert calls[0]["job_dir"] == settings.work_dir / "jobs" / str(job_id)
-    assert calls[0]["plan"] == make_plan()
+    assert calls[0]["plan"] == make_movie()
 
 
 def test_progress_is_saved_at_most_once_a_second(
@@ -81,19 +81,20 @@ def test_progress_is_saved_at_most_once_a_second(
     seen: list[float] = []
 
     def behaviour(plan: Any, report: Any, **kwargs: Any) -> PipelineResult:
-        report(Step.VIDEO_PASS1, 0.1)
+        report(Step.VIDEO_PASS1, 0.1, 1)
         seen.append(job(engine, job_id).progress)
-        report(Step.VIDEO_PASS1, 0.2)  # same second: not saved
+        report(Step.VIDEO_PASS1, 0.2, 1)  # same second: not saved
         seen.append(job(engine, job_id).progress)
         clock[0] = 1.5
-        report(Step.VIDEO_PASS1, 0.3)
+        report(Step.VIDEO_PASS1, 0.3, 1)
         seen.append(job(engine, job_id).progress)
         return PipelineResult(iso_path=Path("/x.iso"), qa_json=None)
 
     fake_pipeline(monkeypatch, behaviour)
     make_worker(engine, settings, clock).run_once()
 
-    assert seen == pytest.approx([0.1 * 35 / 102, 0.1 * 35 / 102, 0.3 * 35 / 102])
+    assert seen == pytest.approx([0.1 * 35 / 103, 0.1 * 35 / 103, 0.3 * 35 / 103])
+    assert job(engine, job_id).step == "1:video_pass1"
 
 
 @pytest.mark.parametrize(

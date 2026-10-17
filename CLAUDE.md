@@ -143,6 +143,12 @@ Uma tarefa só está pronta quando:
   misturar (ex: os filmes em BD-50 e os extras em DVD-9).
 - Assistente "dividir série em discos": dado o perfil escolhido, distribui os episódios em N discos
   respeitando a qualidade mínima. O Vini revisa e ajusta antes de confirmar.
+- Fase 4a (feito): a tela **Montar DVD** de uma pasta: todos os vídeos dela, em ordem editável,
+  tipo Filmes ou Série, **idiomas escolhidos uma vez para o disco** (cada título usa a melhor
+  faixa de cada idioma; o que falta é avisado), capítulos, tema do menu com preview e a
+  calculadora do disco inteiro (o mesmo bitrate para todos os títulos). As escolhas ficam salvas
+  em `disc_project`; as confirmações (qualidade baixa, substituir ISO) nunca são salvas. Limites:
+  60 títulos, 4 idiomas de áudio e 4 de legenda.
 
 ### 3.4 Menus
 - Menu principal com os títulos do disco; submenu de episódios para séries; submenus de áudio e de
@@ -152,12 +158,17 @@ Uma tarefa só está pronta quando:
 - Navegação completa pelo controle remoto (cima, baixo, esquerda, direita, enter); o botão "menu"
   sempre volta para o menu principal.
 - Fase futura: menu com vídeo de fundo e música em loop.
+- Fase 4a (feito): ao colocar o disco abre o menu principal. Filmes: um botão por filme (mais de
+  6 ganham páginas) e o filme volta à própria página e botão. Série: "Tocar todos", páginas de
+  até 6 episódios (o episódio escolhido segue até o fim do disco). "Áudio" e "Legendas" são
+  páginas com ✓ no item ligado. Tema: fundo do TMDB (ou neutro), paleta fechada de 6 cores (ou
+  a tirada do fundo) e lado dos botões. Logo e menu de capítulos ficam para a Fase 8.
 
 ### 3.5 Geração do disco
 - Fila de jobs: encode → render do menu → authoring → `.iso`.
 - Progresso em tempo real (lido da saída do ffmpeg), tempo estimado, log completo de cada etapa.
 - Cancelar job (Fase 3). Retomar job e reaproveitar um título já codificado com os mesmos
-  parâmetros ficam para a Fase 4.
+  parâmetros ficam para a Fase 4b.
 - Antes de começar, checar o espaço livre na pasta de trabalho (um BD-50 pode precisar de >100 GB
   de intermediários).
 - Limpar os intermediários ao final, **com confirmação**.
@@ -229,6 +240,21 @@ validado com teste antes de virar padrão.
 - Menus: 720x480; respeitar a **área segura** (~10% de margem) porque TVs cortam as bordas;
   o destaque dos botões é um subpicture com **paleta de no máximo 4 cores** (restrição real para o
   designer); até 36 botões por menu.
+- Menus (Fase 4a, testados na libdvdnav):
+  - fundo desenhado em pixels quadrados (854x480 no 16:9, 640x480 no 4:3) e reduzido para
+    720x480; o destaque é desenhado direto em 720x480, sem antialias, com coordenadas pares;
+  - menu 16:9 com `widescreen="nopanscan"` e **dois streams de botões** (o 1 é o letterbox, com
+    `y' = 60 + 3y/4`), senão o destaque fica fora do lugar numa TV 4:3;
+  - cada página é 1 s de MPEG-2 parado com `-q:v 2` e `+ilme` (sem ele sai
+    `progressive_sequence = 1`), `-maxrate` junto do `-bufsize`, AC-3 silencioso e
+    `pause="inf"`;
+  - **um titleset por título** (o dvdauthor marca toda faixa declarada como presente em todos os
+    títulos do titleset);
+  - toda a navegação passa pelo VMGM: menu 1 (entry title, onde caem Title e Menu) mostra a
+    página principal; menu 2 despacha o próximo título (`g2`, zerado antes do pulo); menu 3
+    mostra a página do `g5`; páginas a partir do menu 4. Registradores só g0 a g12 (g14 e g15
+    são do dvdauthor); `button = 1024 × n`;
+  - **até 60 títulos**: o despachante custa 2 comandos por título, e uma PGC aceita 128.
 - Ferramentas: `ffmpeg` para o encode, `dvdauthor` para VIDEO_TS e navegação, `spumux` para
   botões e legendas, `genisoimage -dvd-video -udf` para o ISO (ver Log de decisões: o `xorriso`
   não gera a ponte UDF 1.02 que o DVD-Video exige).
@@ -270,7 +296,7 @@ validado com teste antes de virar padrão.
 | Qualidade | **ruff** (lint e format), **mypy** (strict no projeto todo), **pytest** + pytest-cov |
 | API | **FastAPI** + **Pydantic** v2 |
 | Banco | **SQLite** com **SQLModel**; migrações com **Alembic** |
-| Frontend | **Jinja2 + HTMX + CSS próprio** (sem build; reavaliar no editor de menus, Fase 4) |
+| Frontend | **Jinja2 + HTMX + CSS próprio** (sem build; a Fase 4a manteve: o tema tem 3 ajustes, sem editor livre) |
 | Jobs | tabela `jobs` no SQLite + processo worker separado. Sem Celery/Redis a menos que fique necessário |
 | Mídia | `ffmpeg`/`ffprobe`, `dvdauthor`, `spumux`, `genisoimage`, `tsMuxeR`, `xorriso` |
 | Imagens e PDF | **Pillow** para menus e artes; **reportlab** para o PDF de impressão |
@@ -322,12 +348,13 @@ src/projeto_dvd/
   web/            # templates Jinja, estáticos
   library/        # scan, ffprobe, detecção de legendas externas
   metadata/       # parser de nomes, modelos e cliente TMDB, matching, artes, curadoria (banco e disco)
-  planner/        # perfis, calculadora, fontes suportadas, plano do disco (dvd_plan), divisor de série
+  planner/        # perfis, calculadora, fontes suportadas, disco da pasta (disc), modelos do
+                  # plano (disc_plan), escolhas → plano (disc_build), faixas por título (dvd_plan)
   encode/         # comandos ffmpeg por perfil (funções puras); mpeg2.py: soft pulldown e leitura
   authoring/
-    dvd/          # mux, dvdauthor XML, spumux, QA automática do ISO
+    dvd/          # mux, menus (MPEG-2 parado, spumux), dvdauthor XML, QA automática do ISO
     bluray/       # tsMuxeR meta, (menus após o spike)
-  menus/          # temas, layout, render de fundo e botões
+  menus/          # páginas (pages), paleta e fundos (theme), geometria (layout), Pillow (render)
   covers/         # layout de capa, lombada, verso, label, PDF
   jobs/           # runner de processos, pipeline, fila (store), worker, arquivos do job
   db/             # modelos SQLModel, sessão, migrações
@@ -358,11 +385,14 @@ Em paralelo: `artes → composição da capa → PDF`.
   temporada/episódio, o `label` da tela e os detalhes do TMDB inteiros em `tmdb_json` (nome,
   sinopse, elenco, duração e collection calculados na hora).
 - `Collection`: agrupamento (franquia ou temporada), com tema visual. Adiada para a Fase 7.
-- `DiscProject`: um disco; **perfil escolhido**, títulos em ordem, faixas selecionadas, capítulos, tema do menu, status.
+- `DiscProject` (tabela `disc_project`, Fase 4a): um por pasta; o `DiscChoices` inteiro em
+  `choices_json` (tipo, ordem, perfil, idiomas, capítulos, tema), salvo a cada mudança e
+  reconciliado com a pasta ao abrir. Sem chave estrangeira (um rescan não apaga o projeto).
 - `DiscSet`: box com vários `DiscProject` (cada um com o próprio perfil).
-- `Job` (tabela `job`, Fase 3): uma geração de disco; o `DvdPlan` inteiro em `plan_json` (no
-  lugar de um `DiscProject` por enquanto), status, etapa, progresso, erro, QA e caminho do ISO;
-  log em `WORK_DIR/jobs/<id>/job.log`. Hash para reaproveitar encode fica para a Fase 4.
+- `Job` (tabela `job`, Fase 3): uma geração de disco; o `DiscPlan` inteiro em `plan_json` (um
+  `TitlePlan` por vídeo e o `MenuPlan` com as páginas; jobs da Fase 3 convertidos pela migração
+  `0004`), status, etapa (`"2:video_pass2"` por título), progresso, erro, QA e caminho do ISO;
+  log em `WORK_DIR/jobs/<id>/job.log`. Hash para reaproveitar encode fica para a Fase 4b.
 - `ArtAsset`: arte baixada; tipo (poster, backdrop, logo, still), caminho, origem, idioma.
 - `CoverLayout`: escolhas de arte e texto de uma capa, e o PDF gerado.
 
@@ -374,12 +404,14 @@ Em paralelo: `artes → composição da capa → PDF`.
    da pasta, numa lista de cartões acima da tabela técnica (sem tela própria por enquanto).
 3. **Coleções**: criar, agrupar, definir tema.
 4. **Montador de disco**: títulos, **seletor de perfil**, calculadora, ordem, capítulos, áudio/legenda.
+   Fase 4a: a tela **Montar DVD** (`/folders/{pasta}/dvd`) com Títulos, Idiomas, Menu (preview e
+   ajustes), Capítulos e Disco, e a barra fixa da calculadora; a tela 6 (Menu) fica nela.
 5. **Box**: discos do conjunto, perfil de cada um, numeração.
 6. **Menu**: tema e preview.
 7. **Capa**: escolha das artes, preview, gerar PDF.
 8. **Jobs** (Fase 3): lista e tela do job (etapas, progresso, tempo restante, log, cancelar,
-   apagar temporários, resultado da QA). Na Fase 3 o "montador" é o formulário "Gerar DVD" de
-   uma pasta com um vídeo; retomar fica para a Fase 4.
+   apagar temporários, resultado da QA). Com vários títulos, só o título atual mostra as
+   etapas. Retomar fica para a Fase 4b.
 9. **Configurações**: pastas, chave TMDB, padrões (NTSC/PAL, idioma).
 
 ---
@@ -406,13 +438,20 @@ CLAUDE.md, inclusive a regra do travessão.
   argumentos gerada, sem rodar o ffmpeg), geração do XML do dvdauthor, layout de capa (medidas).
 - **Integração**: gerar clipes de 10 a 30 s com `ffmpeg -f lavfi` (testsrc + sine), montar um
   disco de verdade e validar a estrutura. Marcar como `@pytest.mark.slow` e rodar no CI.
+- **Navegação** (Fase 4a): os testes `slow` navegam o ISO com a **libdvdnav** (a VM do VLC, via
+  `ctypes`, só na imagem de teste): inserir abre o menu, "Tocar todos" encadeia, Title e Menu
+  voltam ao principal, a escolha de idioma vale no título, o filme volta à página dele. Os
+  unitários desenham os menus com a fonte do Pillow; a imagem de teste usa o DejaVu
+  (`REAL_FONTS=1`).
 - **TMDB**: mockar com `httpx2.MockTransport` (o `respx` mocka o `httpx`, não o `httpx2`); nunca
   chamar a API real nos testes; JSON de teste inventado, nunca copiado de respostas reais.
 - **Checklist de QA do ISO** (agente `qa`), antes de gravar qualquer disco:
   1. tamanho do ISO ≤ capacidade física da mídia (reprova); acima da capacidade útil de 97%
      só avisa;
-  2. estrutura válida (VIDEO_TS com IFO/BUP/VOB ou BDMV/CERTIFICATE);
-  3. `ffprobe` nos streams: codec, resolução, aspecto, faixas e idiomas corretos;
+  2. estrutura válida (VIDEO_TS com IFO/BUP/VOB, um titleset por título e o VIDEO_TS.VOB dos
+     menus, ou BDMV/CERTIFICATE);
+  3. `ffprobe` nos streams de cada título (`-title N`) e de cada página de menu
+     (`-menu 1 -menu_vts 0 -pgc K`): codec, resolução, aspecto, faixas e idiomas corretos;
   4. abre no VLC pelo menu, cada botão leva ao título certo, "menu" volta (disco sem menu, Fase
      3: o filme começa sozinho, "Menu" e "Title" não travam, no fim o disco para);
   5. áudio e legendas trocam pelo menu (sem menu: pelo VLC/controle; a faixa e a legenda do
@@ -470,9 +509,11 @@ não mudam; a Fase 3 vem antes da 2 para ter um disco de verdade o quanto antes.
       player físico, quando o gravador for comprado.
 - [ ] **Fase 2: Curadoria.** Parser de nomes, TMDB, correção manual, download de artes (coleções
       na Fase 7). Implementada; falta a QA com o token real, no final do projeto.
-- [ ] **Fase 4: Montador + menus DVD.** Vários títulos, episódios, menus com tema, submenus de
-      áudio/legenda, retomar job e reaproveitar encode, copiar o vídeo de rip de DVD sem
-      recodificar.
+- [ ] **Fase 4: Montador + menus DVD.** Dividida em duas entregas (2026-10-16):
+  - [ ] **4a: Montador + menus.** Vários títulos, episódios, menus com tema, páginas de áudio e
+        legenda. Implementada; falta a QA no VLC e no player físico, no final do projeto.
+  - [ ] **4b: Robustez.** Retomar job, reaproveitar encode, copiar o vídeo de rip de DVD sem
+        recodificar.
 - [ ] **Fase 5: Capas.** Composição frente/lombada/verso, label, PDF.
 - [ ] **Fase 6: Blu-ray.** BDMV sem menu com perfil BD-25/BD-50 + spike de menus e decisão.
 - [ ] **Fase 7: Boxes.** Conjuntos de discos com perfis independentes, tema unificado, lombadas
@@ -493,7 +534,10 @@ não mudam; a Fase 3 vem antes da 2 para ter um disco de verdade o quanto antes.
 - **Volume `data`:** a checagem de escrita da Fase 3 cobre `/work` e `/output` (o formulário
   explica o `chown`); o `/data` falha de forma explícita na migração do startup. O volume mantém
   o dono antigo se já existia ou se o `UID` da imagem mudar.
-- **Copiar o vídeo de um rip de DVD sem recodificar** (evita perder uma geração): Fase 4 ou antes.
+- **Copiar o vídeo de um rip de DVD sem recodificar** (evita perder uma geração): Fase 4b.
+- **Menus no player físico** (Fase 4a, testados só na libdvdnav): a camada letterbox numa TV
+  4:3, a PGC só de comandos (despachantes e menu raiz) e o contraste parcial da faixa de
+  destaque (alfa da paleta do PNG virando contraste 5/15 e 9/15 no spumux).
 - **HDR/4K, PGS, VobSub, PAL:** fora da Fase 3; a receita de tonemap do `tech-lead-midia` está na
   spec da Fase 3.
 - **Medidas exatas das capas e do label:** confirmar com o material comprado.
@@ -539,6 +583,15 @@ _Atualizar ao fim de cada sessão._
   baixa as artes padrão para `OUTPUT_DIR/covers/`. Sem token, a tela explica como configurar.
   O "Gerar DVD" usa o idioma original do TMDB. `make lint` e `make test` verdes com 100% de
   cobertura. Falta a QA com o token real (no final do projeto, decisão do Vini).
+- 2026-10-16: **Fase 4 dividida** em 4a (montador + menus) e 4b (retomar job, reaproveitar encode,
+  copiar rip). **Fase 4a implementada** na branch `feat/fase-4a-montador-menus` (spec e plano em
+  `docs/plans/2026-10-16-fase-4a-montador-menus*.md`, spec revisada por `tech-lead-midia` com
+  testes reais no dvdauthor e na libdvdnav, `designer` e `revisor-codigo`). Uma pasta inteira
+  vira um DVD com menu: tela "Montar DVD" (ordem, idiomas do disco, tema com preview,
+  calculadora do disco), menus desenhados com o Pillow, navegação pelo VMGM com um titleset por
+  título, QA por título e por página de menu. `make lint`, `make test` (100% de cobertura) e
+  `make test-slow` (19, com a navegação na libdvdnav) verdes; tela conferida em 375 px e 1100
+  px. Falta a QA manual no VLC e no player físico (no final do projeto).
 - Os agentes de `.claude/agents/` só são reconhecidos pelo nome a partir de uma sessão nova; na
   sessão em que foram criados, rodam como agente genérico lendo o próprio arquivo.
 
@@ -659,3 +712,25 @@ _Atualizar ao fim de cada sessão._
   episódio por uma segunda chamada da temporada em `en-US`, só quando precisa).
 - 2026-10-16 (Fase 2): atribuição do TMDB no rodapé de todas as páginas, com o logo oficial "blue
   short" versionado, e no README com a frase oficial e o uso não comercial.
+- 2026-10-16 (Fase 4a): Fase 4 dividida em 4a e 4b; o disco abre no menu (mesmo com um título);
+  série com "Tocar todos" e episódio que segue até o fim; idiomas escolhidos uma vez para o
+  disco; tema automático com 3 ajustes (fundo, cor, lado); "Áudio" e "Legendas" em páginas com ✓
+  (proposta do `designer`, aprovada pelo Vini).
+- 2026-10-16 (Fase 4a): um titleset por título (o dvdauthor 0.7.2 marca toda faixa declarada
+  como presente e declara errado os canais quando os títulos de um titleset diferem); toda a
+  navegação pelo VMGM com despachantes só de comandos; Title e Menu sempre no menu principal
+  (o despachante de títulos zera `g2` antes de pular: sem isso a tecla Title recomeçava o
+  episódio); limite de 60 títulos pelos 128 comandos da PGC.
+- 2026-10-16 (Fase 4a): menus em pixel quadrado reduzidos para 720x480, destaque de 4 cores
+  desenhado direto em 720x480; menu 16:9 com stream letterbox; fundo em MPEG-2 parado com
+  `-q:v 2`, `+ilme` e AC-3 silencioso; 2 MiB por página na calculadora (medido até 1,2 MB).
+- 2026-10-16 (Fase 4a): `disc_project` guarda o `DiscChoices` em JSON, reconciliado com a pasta
+  ao abrir; as confirmações nunca são salvas; o caminho do fundo nunca vem do formulário (só o
+  nome de uma pasta de arte que o servidor lista). A migração `0004` converte os planos da
+  Fase 3 com dicionários e falha os jobs ativos. O preview é desenhado a cada pedido, sem cache.
+- 2026-10-16 (Fase 4a): a classificação pelos quadros (rips MPEG-2) só roda ao gerar; a tela usa
+  só o ffprobe. Faixa sem idioma vira "Idioma não informado"; legenda só forçada conta como
+  ausente; título sem nenhum idioma escolhido toca a própria primeira faixa.
+- 2026-10-16 (Fase 4a): navegação testada com a libdvdnav (a VM do VLC) nos testes `slow`;
+  o player físico continua sendo o teste final.
+

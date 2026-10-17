@@ -1,3 +1,4 @@
+import json
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 
@@ -11,6 +12,7 @@ from sqlmodel import Session, SQLModel, select
 
 from projeto_dvd.db.models import MediaFile, Title
 from projeto_dvd.db.session import _config, is_migrated, make_engine, migrate
+from projeto_dvd.planner.disc_plan import DiscPlan
 
 
 def make_row(path: str = "Disco/a.mkv") -> MediaFile:
@@ -131,3 +133,56 @@ def test_migration_0003_keeps_existing_rows(database_url: str) -> None:
         assert len(session.exec(select(MediaFile)).all()) == 1
         assert session.exec(select(Title)).all() == []
     engine.dispose()
+
+
+def test_migration_creates_the_disc_project_table(engine: Engine) -> None:
+    columns = {column["name"] for column in inspect(engine).get_columns("disc_project")}
+
+    assert columns == {"folder", "choices_json"}
+
+
+PHASE_3_PLAN = {
+    "folder": "Filme", "path": "Filme/Filme.mkv", "video_index": 0, "size": 100,
+    "mtime_ns": 200, "duration": 7200.0, "profile": "dvd9", "video_kbps": 8487,
+    "maxrate_kbps": 9000, "estimated_bytes": 8_000_000_000, "mode": "film",
+    "top_field_first": True, "aspect": "16:9", "width": 720, "height": 356, "scale": True,
+    "hd_color": True,
+    "audio": [
+        {"index": 2, "language": "pt", "action": "ac3", "channels": 6, "kbps": 448,
+         "downmix": None, "offset": 0.0},
+        {"index": 1, "language": "en", "action": "copy", "channels": 6, "kbps": 448,
+         "downmix": None, "offset": 0.05},
+    ],
+    "subtitles": [{"key": "s3", "stream_index": 3, "file": None, "language": "pt"}],
+    "subtitle_on": True, "chapters": [0.0, 300.0], "confirmed_low": False,
+    "replace_existing": False, "volume": "FILME", "iso_name": "Filme.iso",
+}  # fmt: skip
+
+
+def test_migration_0004_converts_phase_3_jobs(database_url: str) -> None:
+    command.upgrade(_config(database_url), "0003")
+    engine = make_engine(database_url)
+    insert = text(
+        "INSERT INTO job (folder, plan_json, status, cancel_requested, progress, created_at)"
+        " VALUES (:folder, :plan, :status, 0, 0.0, '2026-10-16 00:00:00')"
+    )
+    with engine.begin() as connection:
+        for folder, status in (("Filme", "done"), ("Outro", "queued"), ("Mais", "running")):
+            plan = json.dumps({**PHASE_3_PLAN, "folder": folder})
+            connection.execute(insert, {"folder": folder, "plan": plan, "status": status})
+
+    migrate(database_url)
+
+    with engine.connect() as connection:
+        rows = connection.execute(text("SELECT plan_json, status, error FROM job ORDER BY id"))
+        jobs = rows.all()
+    engine.dispose()
+    plans = [DiscPlan.model_validate_json(row[0]) for row in jobs]
+    assert plans[0].menu is None
+    assert plans[0].subtitle_on == 1
+    title = plans[0].titles[0]
+    assert (title.path, title.audio_map, title.subtitle_map) == ("Filme/Filme.mkv", (0, 1), (0,))
+    assert title.menu_name == "Filme"
+    assert jobs[0][1:] == ("done", None)
+    old = "Job criado numa versão anterior; gere de novo."
+    assert [row[1:] for row in jobs[1:]] == [("failed", old), ("failed", old)]

@@ -11,10 +11,10 @@ The goal is a physical collection meant to last: discs that follow the official 
 BDMV specifications closely enough to play on an ordinary player 20 years from now, with menus
 simple enough for a child or a grandparent to use with just the remote.
 
-> **Status:** Phase 2 (curation) on top of Phase 3 (minimal DVD). Each video of a disc folder
-> is matched with TMDB (movie or episode, pt-BR data and art), and a folder with one video
-> becomes a DVD-Video ISO without menu, checked automatically before it reaches the output
-> folder. See the roadmap in [`CLAUDE.md`](CLAUDE.md) (in Portuguese).
+> **Status:** Phase 4a (disc builder and DVD menus). Each video of a disc folder is matched
+> with TMDB (movie or episode, pt-BR data and art), and the whole folder becomes a DVD-Video
+> ISO with menus (movies, or a season with "play all"), checked automatically before it
+> reaches the output folder. See the roadmap in [`CLAUDE.md`](CLAUDE.md) (in Portuguese).
 
 ## Planned pipeline
 
@@ -75,44 +75,69 @@ app finds it on [TMDB](https://www.themoviedb.org/) and the Vini confirms it.
    `logo.png` and `metadata.json` (episodes: `S01E03.jpg` and `S01E03.json` in the series
    folder). Choosing among several images comes with the covers.
 
-The "Gerar DVD" form then suggests the audio in the original language from TMDB.
+The "Montar DVD" page then uses the TMDB names in the menu, the backdrop as the menu art and
+the original language to suggest the audio.
 
 <img src="src/projeto_dvd/web/static/tmdb.svg" alt="TMDB" height="14">
 This product uses the TMDB API but is not endorsed or certified by TMDB. The data and images
 are used for personal, non-commercial purposes (printing covers of one's own collection).
 
-## Generating a DVD
+## Building a DVD
 
-1. Put one video in a disc folder, open the folder in the app and click **Escanear**.
-2. Click **Gerar DVD**. The form already suggests everything; change what you want:
-   - **Audio:** the Portuguese and original-language tracks are selected; pick the one that
-     plays when the disc starts. Compatible AC-3 is copied without loss; anything else (DTS,
-     TrueHD, AAC...) becomes AC-3, never inventing channels.
-   - **Subtitles:** text subtitles (an `.srt` next to the video, or a text track inside the
-     MKV) are drawn as DVD subtitles; choose one to start turned on, or none.
-   - **Chapters:** from the file, or every N minutes (99 at most).
-   - **Disc:** DVD-5 (single layer, 4.7 GB) or DVD-9 (dual layer, 8.5 GB), each card showing the
-     size and the picture quality: "Ótima" (5 Mbps or more), "Aceitável" (3.5 to 5), "Baixa"
-     (below 3.5, needs a confirmation) or "Não cabe".
-3. The job page shows each step, the progress and the time left; you can close it and come
-   back from **Jobs**. A 2-hour 1080p movie takes 20 to 30 minutes on a 6-core CPU.
-4. The ISO is checked automatically (size, VIDEO_TS structure, streams and languages, chapters,
-   field order, audio sync, a full decode). Only an approved ISO is copied to
-   `HOST_OUTPUT_DIR\iso\<folder>.iso` (the job page shows the full Windows path); a rejected
-   one stays in the work folder with the reason.
+![A menu page as the TV shows it](docs/images/menu-preview.png)
+
+1. Put the videos of one disc in a folder (three movies, or the episodes of a season), open the
+   folder in the app and click **Escanear**.
+2. Click **Montar DVD**. The page already suggests everything and saves each change:
+   - **Titles:** movies or a series, in the order of the disc (move them up and down). Names
+     come from TMDB when the match is confirmed, or from the file name.
+   - **Languages, for the whole disc:** audio and subtitle languages, which audio plays first
+     and which subtitle starts on. Each title gets its best track of each language; a title
+     that lacks one is listed (it plays its own first track, or no subtitle). Compatible AC-3
+     is copied without loss; anything else becomes AC-3, never inventing channels. Text
+     subtitles (`.srt` or a text track of the MKV) become DVD subtitles.
+   - **Menu:** a live preview of each page, with the backdrop (from TMDB or a dark one), the
+     accent color (from a closed palette, or picked from the backdrop) and the side of the
+     buttons.
+   - **Chapters:** from the file, or every N minutes (99 per title at most).
+   - **Disc:** DVD-5 or DVD-9, each card with the size and the picture quality of the whole
+     disc ("Ótima", "Aceitável", "Baixa" asks for a confirmation, "Não cabe"). Every title gets
+     the same video bitrate, so the quality is the same from the first to the last.
+3. The job page shows the steps of the current title, the progress and the time left; you can
+   close it and come back from **Jobs**.
+4. The ISO is checked automatically (size, VIDEO_TS structure, and for every title and menu
+   page the streams, languages, chapters, field order, audio sync and a full decode). Only an
+   approved ISO is copied to `HOST_OUTPUT_DIR\iso\<folder>.iso`.
 5. Test the ISO in VLC (Media, Open Disc) with the checklist on the job page, then burn it on
    Windows with ImgBurn ("Write image file to disc", low speed, verify).
 
-How it works, briefly: MPEG-2 in two passes (never `-target ntsc-dvd`, which duplicates
-frames); 23.976 fps films get **soft pulldown** by a small in-place patcher (the player shows
-29.97 without judder); 480i sources stay interlaced; DVD rips are classified by their frames;
-`dvdauthor` makes a title that starts on its own and `genisoimage -dvd-video -udf` makes the
-ISO.
+**On the disc:** inserting it opens the main menu. A movie disc lists the movies (more than six
+get their own pages); a series disc has "Tocar todos", the episode pages (an episode keeps
+playing until the end of the disc) and the language pages. "Áudio" and "Legendas" are pages
+of their own with a check mark on the language that is on. A movie returns to its own page and
+button; the Menu and Title keys of the remote always go back to the main menu.
+
+How it works, briefly:
+
+- **Video:** MPEG-2 in two passes (never `-target ntsc-dvd`, which duplicates frames);
+  23.976 fps films get **soft pulldown** by a small in-place patcher; 480i sources stay
+  interlaced; DVD rips are classified by their frames.
+- **Menus:** drawn with Pillow in square pixels and squeezed to 720x480; the button highlight
+  is a 4-color subpicture drawn straight at 720x480 (no antialias). A 16:9 menu has a second
+  button stream for 4:3 TVs that letterbox it. Each page is one second of still MPEG-2 with
+  silent AC-3.
+- **Navigation:** `dvdauthor` with one titleset per title (each declares exactly its own
+  tracks) and every jump through the VMGM, where two command-only PGCs dispatch the next title
+  and the page to show. GPRMs keep the languages, the next episode and the highlighted
+  button. A disc takes up to 60 titles (the dispatcher fits in the 128 commands of one PGC).
+- **ISO:** `genisoimage -dvd-video -udf`.
+- **Tests:** the slow tests author real discs and drive them with libdvdnav, the navigation
+  library of VLC (a physical player is still the final test).
 
 **Not supported yet** (the screen explains why): HDR and 4K, PAL/25 fps, exact 24 fps, 29.97
 progressive, 59.94, variable frame rate, 1080i, image subtitles (PGS, VobSub) and ASS styling,
-menus and several titles per disc. For a movie whose Portuguese subtitle is an image, put an
-`.srt` next to it.
+chapter menus and video menus. For a movie whose Portuguese subtitle is an image, put an `.srt`
+next to it.
 
 The work folder needs about **twice the disc size** free (about 18 GB for a DVD-9): each
 intermediate file is deleted as soon as the next step succeeds, and **Apagar arquivos
@@ -122,6 +147,7 @@ temporários** on the job page removes what is left.
 
 - Python 3.12, FastAPI, Jinja2, HTMX and a small hand-written CSS (no build step)
 - httpx2 for the TMDB API (and its `MockTransport` in the tests: they never call TMDB)
+- Pillow for the menu pages and their preview
 - SQLite (WAL) with SQLModel and Alembic; a separate worker process runs the jobs
 - Media toolchain: ffmpeg, dvdauthor/spumux, genisoimage, tsMuxeR, xorriso
 - Docker and docker compose; GitHub Actions CI

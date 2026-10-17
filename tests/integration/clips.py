@@ -8,8 +8,12 @@ from typing import Any
 from projeto_dvd.encode.mpeg2 import apply_soft_pulldown
 from projeto_dvd.library.files import find_videos
 from projeto_dvd.library.probe import run_ffprobe, summarize
-from projeto_dvd.planner.disc_source import DiscSource, prepare, run_capture, suggested_plan
-from projeto_dvd.planner.dvd_plan import DvdPlan
+from projeto_dvd.metadata.filename import guess
+from projeto_dvd.planner.disc import DiscTitle
+from projeto_dvd.planner.disc_build import TitleSource, build_disc_plan, menu_plan
+from projeto_dvd.planner.disc_plan import DiscPlan
+from projeto_dvd.planner.disc_source import prepare_title, run_capture, suggestion
+from projeto_dvd.planner.dvd_plan import subtitle_options
 
 
 def ffmpeg(*args: str) -> None:
@@ -45,17 +49,67 @@ def movie_1080p(path: Path, seconds: int = 12, noisy: bool = False) -> Path:
     return path
 
 
-def disc_source(media: Path, folder: str) -> DiscSource:
-    video = find_videos(media, media / folder)[0]
-    probe = run_ffprobe(video.absolute)
-    assert probe.json is not None, probe.error
-    result = prepare(folder, video, summarize(json.loads(probe.json)), run_capture)
-    assert isinstance(result, DiscSource), result
+def disc_titles(media: Path, folder: str) -> tuple[DiscTitle, ...]:
+    """The folder as the app sees it after a scan, without the database."""
+    titles = []
+    for video in find_videos(media, media / folder):
+        probe = run_ffprobe(video.absolute)
+        assert probe.json is not None, probe.error
+        summary = summarize(json.loads(probe.json))
+        titles.append(DiscTitle(
+            path=video.path, video=video, summary=summary,
+            options=tuple(subtitle_options(summary, video.subtitles)), info=None,
+            guess=guess(video.path.split("/", 1)[1], folder, 2030),
+        ))  # fmt: skip
+    return tuple(titles)
+
+
+def source_of(media: Path, folder: str) -> TitleSource:
+    result = prepare_title(disc_titles(media, folder)[0], run_capture)
+    assert isinstance(result, TitleSource), result
     return result
 
 
-def plan_for(media: Path, folder: str, **overrides: Any) -> DvdPlan:
-    return suggested_plan(disc_source(media, folder), **overrides)
+def plan_for(media: Path, folder: str, confirm_low: bool = True, **choices: Any) -> DiscPlan:
+    """The suggested disc of a folder, with some choices overridden."""
+    titles = disc_titles(media, folder)
+    chosen = suggestion(titles, folder).model_copy(update=choices)
+    sources = [prepare_title(title, run_capture) for title in titles]
+    ready = [s for s in sources if isinstance(s, TitleSource)]
+    assert len(ready) == len(titles), sources
+    menu = menu_plan(chosen, titles, folder, None, None)
+    return build_disc_plan(folder, ready, chosen, menu, confirm_low=confirm_low,
+                           replace_iso=False)  # fmt: skip
+
+
+def episode(path: Path, languages: tuple[str, ...], aspect: str = "16:9", seconds: int = 4) -> Path:
+    """A short episode: H.264 in the aspect asked, one AC-3 track per language."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    size = "640x360" if aspect == "16:9" else "640x480"
+    inputs: list[str] = ["-f", "lavfi", "-i", f"testsrc2=s={size}:r=24000/1001:d={seconds}"]
+    maps = ["-map", "0:v"]
+    for number, language in enumerate(languages, 1):
+        inputs += [
+            "-f",
+            "lavfi",
+            "-i",
+            f"sine=f={300 + 100 * number}:d={seconds}:sample_rate=48000",
+        ]
+        maps += ["-map", f"{number}:a", f"-metadata:s:a:{number - 1}", f"language={language}"]
+    ffmpeg(*inputs, *maps, "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p",
+           "-aspect", aspect, "-c:a", "ac3", "-b:a", "192k", str(path))  # fmt: skip
+    return path
+
+
+def series_folder(media: Path) -> str:
+    """Three episodes: Portuguese and English with a Portuguese .srt, English only, and a 4:3
+    one in Portuguese only."""
+    folder = media / "Serie"
+    episode(folder / "Serie.S01E01.mkv", ("por", "eng"))
+    srt_cp1252(folder / "Serie.S01E01.pt.srt")
+    episode(folder / "Serie.S01E02.mkv", ("eng",))
+    episode(folder / "Serie.S01E03.mkv", ("por",), aspect="4:3")
+    return "Serie"
 
 
 def srt_cp1252(path: Path) -> Path:
