@@ -2,11 +2,13 @@ import pytest
 
 from projeto_dvd.planner.calculator import (
     MENU_PAGE_BYTES,
+    MENU_RESERVE_PAGES,
     Quality,
     TitleLoad,
     estimate,
     estimate_disc,
     maxrate_kbps,
+    menu_bytes,
     suggest_profile,
 )
 from projeto_dvd.planner.profiles import DVD5, DVD9, PROFILES, DiscProfile
@@ -116,8 +118,20 @@ def test_menu_bytes_count_in_the_size_when_capped() -> None:
 
     assert (
         estimate_disc(DVD5, loads, 3).size_bytes - estimate_disc(DVD5, loads, 0).size_bytes
-        == 3 * MENU_PAGE_BYTES
+        == MENU_RESERVE_PAGES * MENU_PAGE_BYTES
     )
+
+
+def test_menu_space_is_a_fixed_reserve_up_to_twenty_pages() -> None:
+    assert menu_bytes(0) == 0
+    assert menu_bytes(3) == menu_bytes(20) == 20 * MENU_PAGE_BYTES
+    assert menu_bytes(25) == 25 * MENU_PAGE_BYTES
+
+
+def test_changing_the_menu_pages_keeps_the_video_bitrate() -> None:
+    loads = [TitleLoad(5400.0, (448,), 0), TitleLoad(5400.0, (448,), 0)]
+
+    assert estimate_disc(DVD9, loads, 3).video_kbps == estimate_disc(DVD9, loads, 12).video_kbps
 
 
 def test_a_disc_without_duration_is_an_error() -> None:

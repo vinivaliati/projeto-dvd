@@ -12,6 +12,8 @@ services:
       # TMDB API Read Access Token (Bearer); empty turns the curation off. Only the web uses it.
       TMDB_TOKEN: ${TMDB_TOKEN:-}
       TMDB_LANGUAGE: ${TMDB_LANGUAGE:-pt-BR}
+      # Encoded video kept in /work/cache (GB); the web shows it, the worker fills and trims it.
+      CACHE_LIMIT_GB: ${CACHE_LIMIT_GB:-50}
     # The host folders must exist before "up": if one is missing, Docker creates it owned
     # by root and the app (uid 1000) cannot write there. Docker Desktop ignores
     # create_host_path: false, so this is documented in .env.example instead.
@@ -32,6 +34,8 @@ services:
     # The image healthcheck probes the web port; the worker has none.
     healthcheck:
       disable: true
+    environment:
+      CACHE_LIMIT_GB: ${CACHE_LIMIT_GB:-50}
     volumes:
       - ${HOST_MEDIA_DIR:?set HOST_MEDIA_DIR in .env}:/media:ro
       - ${HOST_WORK_DIR:?set HOST_WORK_DIR in .env}:/work

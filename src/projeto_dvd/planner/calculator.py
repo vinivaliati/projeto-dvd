@@ -13,6 +13,9 @@ SUBTITLE_AVERAGE_KBPS = 10
 VBR_HEADROOM = 0.95
 # A still menu page: about a second of MPEG-2 plus the buttons (measured 90 KB to 1.2 MB).
 MENU_PAGE_BYTES = 2 * 1024 * 1024
+# Up to 20 pages cost the same, so changing the menu never changes the video bitrate (and the
+# encode cache keeps working); about 0.5% of a DVD-9.
+MENU_RESERVE_PAGES = 20
 
 
 class Quality(StrEnum):
@@ -59,7 +62,7 @@ def estimate_disc(profile: DiscProfile, titles: Sequence[TitleLoad], menu_pages:
     duration = sum(title.duration for title in titles)
     if duration <= 0:
         raise ValueError("disc without duration")
-    menus = menu_pages * MENU_PAGE_BYTES
+    menus = menu_bytes(menu_pages)
     other_kilobits = sum(title.duration * _other_kbps(title) for title in titles)
     room_kilobits = (profile.usable_bytes - menus) * 8 / (1 + profile.mux_overhead) / 1000
     maxrate = min(maxrate_kbps(profile, t.audio_kbps, t.subtitles) for t in titles)
@@ -73,6 +76,11 @@ def estimate_disc(profile: DiscProfile, titles: Sequence[TitleLoad], menu_pages:
         size_bytes=int(size) + profile.reserve_bytes + menus,
         quality=_quality(profile, video),
     )
+
+
+def menu_bytes(pages: int) -> int:
+    """The space kept for the menus: a fixed reserve, or the pages when there are more."""
+    return max(pages, MENU_RESERVE_PAGES) * MENU_PAGE_BYTES if pages else 0
 
 
 def suggest_profile(estimates: Sequence[Estimate]) -> DiscProfile:

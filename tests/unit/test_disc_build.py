@@ -7,7 +7,7 @@ from PIL import Image
 
 from projeto_dvd.library.files import ExternalSubtitle
 from projeto_dvd.menus.theme import PALETTE
-from projeto_dvd.planner.calculator import MENU_PAGE_BYTES, Quality
+from projeto_dvd.planner.calculator import Quality, menu_bytes
 from projeto_dvd.planner.disc_build import (
     TitleSource,
     build_disc_plan,
@@ -116,7 +116,7 @@ def test_build_disc_plan_shares_one_bitrate_and_counts_the_menus() -> None:
     expected = disc_estimate(DVD9, plan.titles, len(menu.pages))
     assert (plan.video_kbps, plan.estimated_bytes) == (expected.video_kbps, expected.size_bytes)
     without = disc_estimate(DVD9, plan.titles, 0)
-    assert plan.estimated_bytes - without.size_bytes < len(menu.pages) * MENU_PAGE_BYTES + 1
+    assert plan.estimated_bytes - without.size_bytes < menu_bytes(len(menu.pages)) + 1
     assert (plan.volume, plan.iso_name, plan.confirmed_low) == ("P", "P.iso", True)
     assert plan.subtitle_on == 0
 

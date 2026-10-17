@@ -17,6 +17,8 @@ EXTENSION = 0xB5
 GOP = 0xB8
 SEQUENCE_EXTENSION = 1
 PICTURE_CODING_EXTENSION = 8
+# Part of the encode cache key: raise it whenever the patch below changes the stream.
+PULLDOWN_VERSION = 1
 FILM_RATE_CODE = 1  # 23.976
 NTSC_RATE_CODE = 4  # 29.97
 # (top_field_first, repeat_first_field) by display position: T B T | B T | B T B | T B
