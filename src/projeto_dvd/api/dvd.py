@@ -126,6 +126,7 @@ def parse_disc_form(form: Mapping[str, list[str]], disc: Disc) -> DiscChoices | 
         "audio": tuple(audio), "subtitles": tuple(subtitles),
         "subtitle_on": one("subtitle_on") or None, "chapters": one("chapters", "every"),
         "reencode_rips": one("reencode_rips") == "1",
+        "cover": reconcile(disc.saved, disc.titles, disc.suggested, disc.backdrops).cover,
         "theme": {"backdrop": backdrop if backdrop in disc.backdrops else None,
                   "accent": one("accent", "auto"), "side": one("side", "left")},
     }  # fmt: skip

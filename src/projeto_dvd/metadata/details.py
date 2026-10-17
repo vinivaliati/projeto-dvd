@@ -33,6 +33,7 @@ class TitleInfo(BaseModel):
     original_language: str = ""
     collection: str | None = None
     collection_id: int | None = None
+    show_overview: str = ""  # the synopsis of the series, for the back of a season cover
 
 
 def title_info(details: Details) -> TitleInfo:
@@ -65,6 +66,7 @@ def title_info(details: Details) -> TitleInfo:
         cast=[member.name for member in show.credits.cast[:CAST]],
         runtime=episode.runtime,
         original_language=show.original_language,
+        show_overview=show.overview or _english(show.translations).overview,
     )
 
 

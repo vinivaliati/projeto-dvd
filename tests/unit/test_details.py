@@ -6,7 +6,15 @@ from projeto_dvd.metadata.details import (
     movie_label,
     title_info,
 )
-from projeto_dvd.metadata.tmdb_models import EpisodeDetails, Movie, MovieDetails, Season, Show
+from projeto_dvd.metadata.tmdb_models import (
+    DETAILS,
+    EpisodeDetails,
+    Image,
+    Movie,
+    MovieDetails,
+    Season,
+    Show,
+)
 from tests.tmdb_fakes import MOVIE, SHOW, season
 
 
@@ -93,3 +101,29 @@ def test_show_without_portuguese_translation_uses_english() -> None:
                              episode=Season.model_validate(season()).episodes[2])  # fmt: skip
 
     assert title_info(details).show == "Forever Friends"
+
+
+def test_show_overview_in_portuguese_or_english() -> None:
+    episode = Season.model_validate(season()).episodes[0]
+    pt = EpisodeDetails(kind="episode", show=Show.model_validate(SHOW), episode=episode)
+    english = {"iso_639_1": "en", "iso_3166_1": "US", "data": {"overview": "Six friends."}}
+    empty = {**SHOW, "overview": "", "translations": {"translations": [english]}}
+    en = EpisodeDetails(kind="episode", show=Show.model_validate(empty), episode=episode)
+
+    assert title_info(pt).show_overview == "Seis amigos."
+    assert title_info(en).show_overview == "Six friends."
+
+
+def test_old_details_without_the_new_fields_still_load() -> None:
+    old = {"kind": "movie", "movie": {**MOVIE, "belongs_to_collection": {"id": 9, "name": "C"}}}
+    details = DETAILS.validate_python(old)
+    assert details.kind == "movie" and details.movie.belongs_to_collection is not None
+    assert details.movie.belongs_to_collection.poster_path is None
+    with_poster = {**old["movie"], "belongs_to_collection": {"id": 9, "name": "C",
+                                                             "poster_path": "/c.jpg"}}  # fmt: skip
+    movie = DETAILS.validate_python({"kind": "movie", "movie": with_poster})
+    assert movie.kind == "movie" and movie.movie.belongs_to_collection is not None
+    assert movie.movie.belongs_to_collection.poster_path == "/c.jpg"
+    assert (
+        Image.model_validate({"file_path": "/a.jpg", "width": 2000, "height": 3000}).height == 3000
+    )

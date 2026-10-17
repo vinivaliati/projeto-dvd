@@ -19,6 +19,7 @@ from projeto_dvd.metadata.curation import (
     download_again,
     original_language,
     run_suggestions,
+    title_art_dir,
 )
 from projeto_dvd.metadata.details import title_info
 from projeto_dvd.metadata.tmdb import TOKEN_REFUSED, TmdbClient, TmdbError
@@ -341,3 +342,26 @@ def test_episode_label_and_folder_use_the_english_show_name(
 
     assert title.label == "Forever Friends · S01E03 · O Polegar"
     assert (tmp_path / "covers" / "Amigos" / "Forever Friends" / "S01E03.jpg").exists()
+
+
+def test_confirm_episode_keeps_the_season_poster(session: Session, tmp_path: Path) -> None:
+    row = add_file(session, "Amigos/S01E01.mkv", seconds=22 * 60)
+    assert row.id is not None
+    routes: dict[str, object] = {"/3/tv/202": SHOW, "/3/tv/202/season/1": season(), **IMAGES,
+                                 "/t/p/original/still1.jpg": b"img"}  # fmt: skip
+
+    title = confirm(session, row.id, Choice("episode", 202, 1, 1), tmdb(routes), tmp_path)
+
+    details = DETAILS.validate_json(title.tmdb_json or "")
+    assert details.kind == "episode" and details.season_poster_path == "/seasonposter.jpg"
+
+
+def test_title_art_dir_is_where_the_art_is_saved(session: Session, tmp_path: Path) -> None:
+    row = add_file(session, "Anel/a.mkv")
+    assert row.id is not None
+    title = confirm(session, row.id, Choice("movie", 101),
+                    tmdb({"/3/movie/101": MOVIE, **IMAGES}), tmp_path)  # fmt: skip
+
+    folder = title_art_dir(tmp_path, "Anel", DETAILS.validate_json(title.tmdb_json or ""))
+
+    assert (folder / "poster.jpg").exists()
