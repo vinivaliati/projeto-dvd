@@ -100,6 +100,13 @@ def format_encode_time(duration: float, hd: bool) -> str:
     return format_remaining(duration * ENCODE_SECONDS_PER_SECOND[hd])
 
 
+def output_display(host_output_dir: str | None, relative: str) -> str:
+    """Where a file of OUTPUT_DIR is on Windows, or how to find it without HOST_OUTPUT_DIR."""
+    if host_output_dir:
+        return windows_path(host_output_dir, relative)
+    return f"{relative.replace('/', chr(92))} (na pasta HOST_OUTPUT_DIR do .env)"
+
+
 def windows_path(host_dir: str, relative: str) -> str:
     """/mnt/c/Users/x + iso/F.iso as C:\\Users\\x\\iso\\F.iso; other paths stay POSIX."""
     parts = [part for part in host_dir.split("/") if part]

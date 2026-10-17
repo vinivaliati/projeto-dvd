@@ -11,11 +11,11 @@ The goal is a physical collection meant to last: discs that follow the official 
 BDMV specifications closely enough to play on an ordinary player 20 years from now, with menus
 simple enough for a child or a grandparent to use with just the remote.
 
-> **Status:** Phase 4b (resume, encode cache, DVD rip copy) on top of 4a (disc builder and
-> DVD menus). Each video of a disc folder is matched
-> with TMDB (movie or episode, pt-BR data and art), and the whole folder becomes a DVD-Video
-> ISO with menus (movies, or a season with "play all"), checked automatically before it
-> reaches the output folder. See the roadmap in [`CLAUDE.md`](CLAUDE.md) (in Portuguese).
+> **Status:** Phase 5 (printable cover and disc labels) on top of the DVD with menus of
+> Phases 4a and 4b. Each video of a disc folder is matched with TMDB (movie or episode, pt-BR
+> data and art), the whole folder becomes a DVD-Video ISO with menus, checked automatically,
+> and the **Capa** page prints the case insert and two round labels on A4. See the roadmap in
+> [`CLAUDE.md`](CLAUDE.md) (in Portuguese).
 
 ## Planned pipeline
 
@@ -159,11 +159,35 @@ The work folder needs about **three times the disc size** free with the cache on
 for a DVD-9; twice without it): each intermediate file is deleted as soon as the next step
 succeeds, and **Apagar arquivos temporários** on the job page removes what is left.
 
+## Printing the cover
+
+The **Capa** button of a folder opens the cover of the disc it builds (it reads what the
+Montar DVD page saved: titles, languages, backdrop and accent color).
+
+![A cover insert: back, spine and front on an A4 sheet](docs/images/cover-preview.png)
+
+- **Case insert** for a standard DVD case (Amaray, 273 x 183 mm with a 14 mm spine) on an A4
+  sheet turned sideways, with 3 mm of bleed, crop marks, fold marks for the spine and a 50 mm
+  ruler. **Front:** the chosen art, the name and a line such as "3 filmes" or "Temporada 1 · 8
+  episódios". **Spine:** the name read from the bottom up, plus the year or "T1". **Back:** the
+  synopsis and cast of a movie, the list of movies or episodes with their real durations, and a
+  technical box (duration, audio, subtitles, video, disc).
+- **Disc labels:** a second A4 page with two round labels (117 mm, 41 mm hole, the common
+  Pimaco layout), with the menu backdrop cut in a ring.
+- **Art:** a grid with every poster and backdrop TMDB sent for the confirmed titles (the season
+  or collection poster first), with a badge when an image would print below 300 DPI. The chosen
+  one is downloaded once to `OUTPUT_DIR/covers/<folder>/`. A poster that already shows its
+  title gets no name on top (automatic, can be changed).
+- **Print:** "Gerar PDF" writes `OUTPUT_DIR/print/<folder>.pdf` (300 DPI, sRGB). Print it at
+  **actual size** (100%, no "fit to page"), check the 50 mm ruler with a ruler, cut on the
+  marks and fold on the spine marks. The measures live in `covers/sizes.py`: check them against
+  the case and the label sheet you bought before printing a batch.
+
 ## Stack
 
 - Python 3.12, FastAPI, Jinja2, HTMX and a small hand-written CSS (no build step)
 - httpx2 for the TMDB API (and its `MockTransport` in the tests: they never call TMDB)
-- Pillow for the menu pages and their preview
+- Pillow for the menu pages, the covers and their PDF
 - SQLite (WAL) with SQLModel and Alembic; a separate worker process runs the jobs
 - Media toolchain: ffmpeg, dvdauthor/spumux, genisoimage, tsMuxeR, xorriso
 - Docker and docker compose; GitHub Actions CI

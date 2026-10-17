@@ -126,6 +126,7 @@ def parse_disc_form(form: Mapping[str, list[str]], disc: Disc) -> DiscChoices | 
         "audio": tuple(audio), "subtitles": tuple(subtitles),
         "subtitle_on": one("subtitle_on") or None, "chapters": one("chapters", "every"),
         "reencode_rips": one("reencode_rips") == "1",
+        "cover": saved_choices(disc).cover,
         "theme": {"backdrop": backdrop if backdrop in disc.backdrops else None,
                   "accent": one("accent", "auto"), "side": one("side", "left")},
     }  # fmt: skip
@@ -135,7 +136,7 @@ def parse_disc_form(form: Mapping[str, list[str]], disc: Disc) -> DiscChoices | 
         return None
 
 
-async def _form(request: Request) -> dict[str, list[str]]:
+async def read_form(request: Request) -> dict[str, list[str]]:
     """The urlencoded form; parsed here so python-multipart is not needed for a few fields."""
     return parse_qs((await request.body()).decode(), keep_blank_values=True)
 
@@ -152,10 +153,10 @@ def dvd_form(
     active = store.active_job(session, name)
     if active is not None:
         return _redirect(request, "job_page", job_id=active.id)
-    disc = _disc(session, media_dir, settings, name, folder)
+    disc = load_disc_page(session, media_dir, settings, name, folder)
     if disc is None:
         return _redirect(request, "folder", name=name)
-    choices = _choices(disc)
+    choices = saved_choices(disc)
     return _render(request, "dvd_form.html", settings, disc, choices, errors=[])
 
 
@@ -168,12 +169,12 @@ async def dvd_choices(
     media_dir: MediaDirDep,
     settings: SettingsDep,
 ) -> Response:
-    form = await _form(request)
-    disc = _disc(session, media_dir, settings, name, folder)
+    form = await read_form(request)
+    disc = load_disc_page(session, media_dir, settings, name, folder)
     choices = parse_disc_form(form, disc) if disc else None
     if disc is None or choices is None:
         return HTMLResponse(f'<p class="banner banner-error" role="alert">{INVALID_FORM}</p>')
-    before = _choices(disc)
+    before = saved_choices(disc)
     project = session.get(DiscProject, name) or DiscProject(folder=name, choices_json="")
     project.choices_json = choices.model_dump_json()
     session.add(project)
@@ -192,10 +193,10 @@ def dvd_menu_preview(
     settings: SettingsDep,
     page: int = 0,
 ) -> Response:
-    disc = _disc(session, media_dir, settings, name, folder)
+    disc = load_disc_page(session, media_dir, settings, name, folder)
     if disc is None:
         raise HTTPException(status_code=404)
-    menu = disc_menu(_choices(disc), disc.titles, name, settings.output_dir)
+    menu = disc_menu(saved_choices(disc), disc.titles, name, settings.output_dir)
     if not 0 <= page < len(menu.pages):
         raise HTTPException(status_code=404)
     # The page URL carries a hash of the choices, so a new choice never shows an old image.
@@ -215,13 +216,15 @@ async def create_dvd(
     active = store.active_job(session, name)
     if active is not None:
         return _redirect(request, "job_page", job_id=active.id)
-    disc = _disc(session, media_dir, settings, name, folder)
+    disc = load_disc_page(session, media_dir, settings, name, folder)
     if disc is None:
         return _redirect(request, "folder", name=name)
-    form = await _form(request)
+    form = await read_form(request)
     choices = parse_disc_form(form, disc)
     if choices is None:
-        return _render(request, "dvd_form.html", settings, disc, _choices(disc), [INVALID_FORM])
+        return _render(
+            request, "dvd_form.html", settings, disc, saved_choices(disc), [INVALID_FORM]
+        )
     # Asked at the moment of generating, never saved: a later, worse disc asks again.
     confirm_low = form.get("confirm_low", [""])[0] == "1"
     replace_iso = form.get("replace_iso", [""])[0] == "1"
@@ -264,7 +267,7 @@ def prepare_titles(titles: Sequence[DiscTitle]) -> tuple[list[TitleSource], list
     return sources, errors
 
 
-def _disc(
+def load_disc_page(
     session: Session, media_dir: Path, settings: Settings, name: str, folder: Path
 ) -> Disc | None:
     view, titles = load_disc(session, media_dir, name, folder)
@@ -277,7 +280,7 @@ def _disc(
     )  # fmt: skip
 
 
-def _choices(disc: Disc) -> DiscChoices:
+def saved_choices(disc: Disc) -> DiscChoices:
     return reconcile(disc.saved, disc.titles, disc.suggested, disc.backdrops)
 
 

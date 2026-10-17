@@ -2,7 +2,7 @@
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from projeto_dvd.planner.dvd_plan import AudioChoice, SubtitleChoice
 from projeto_dvd.planner.source import VideoMode
@@ -22,6 +22,18 @@ class Theme(BaseModel):
     side: Literal["left", "right"] = "left"
 
 
+class CoverChoices(BaseModel):
+    """The cover of the disc (Phase 5); kept by the Montar DVD page, which has none of it."""
+
+    model_config = ConfigDict(frozen=True)
+
+    front: str | None = None  # TMDB path of the chosen art (marks it in the grid)
+    front_language: str | None = None  # its language: art with a title gets no name on top
+    show_name: bool | None = None  # None: automatic
+    front_text: str | None = Field(default=None, max_length=80)  # None: automatic
+    spine_text: str | None = Field(default=None, max_length=80)
+
+
 class DiscChoices(BaseModel):
     """What the Vini picked on the Montar DVD page, saved in disc_project as it changes."""
 
@@ -37,6 +49,7 @@ class DiscChoices(BaseModel):
     minutes: int
     theme: Theme = Theme()
     reencode_rips: bool = False  # Phase 4b: DVD rips are copied unless this is checked
+    cover: CoverChoices = CoverChoices()
 
 
 class TitlePlan(BaseModel):

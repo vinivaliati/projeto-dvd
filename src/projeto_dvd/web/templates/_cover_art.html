@@ -1,0 +1,25 @@
+<section id="cover-art" class="cover-art"{% if oob %} hx-swap-oob="true"{% endif %} aria-labelledby="cover-art-title">
+  <h2 id="cover-art-title">Arte da frente</h2>
+  {% if not tmdb %}<p class="muted">Sem o token do TMDB dá para ver as opções, mas não baixar uma nova.</p>{% endif %}
+  <form hx-post="{{ url_for('cover_art', name=disc.name | urlencode) }}" hx-trigger="change" hx-swap="none" class="art-grid">
+    <label class="art-option">
+      <input type="radio" name="file_path" value=""{% if not choices.cover.front %} checked{% endif %}>
+      <span class="art-none">Padrão</span>
+      <span class="muted">O pôster já baixado do primeiro título, ou o fundo escuro</span>
+    </label>
+    {% for option in cover.options %}
+    <label class="art-option">
+      <input type="radio" name="file_path" value="{{ option.path }}"{% if choices.cover.front == option.path %} checked{% endif %}>
+      <img src="https://image.tmdb.org/t/p/{{ 'w185' if option.kind == 'poster' else 'w300' }}{{ option.path }}" loading="lazy" alt=""
+           class="art-{{ option.kind }}">
+      <span>{{ option.owner }}</span>
+      <span class="art-badges">
+        {% if option.kind == "backdrop" %}<span class="badge">fundo</span>{% if option.language %} <span class="badge">pode ter texto</span>{% endif %}{% endif %}
+        {% if option.dpi is none %}<span class="badge">resolução desconhecida</span>
+        {% elif option.dpi < print_dpi %}<span class="badge badge-warnings">abaixo de 300 DPI</span>{% endif %}
+      </span>
+    </label>
+    {% endfor %}
+  </form>
+  {% if not cover.options %}<p class="muted">Sem artes do TMDB para estes títulos. Confirme os títulos no TMDB para escolher uma.</p>{% endif %}
+</section>

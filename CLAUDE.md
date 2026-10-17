@@ -179,11 +179,13 @@ Uma tarefa só está pronta quando:
 ### 3.6 Capas
 - Para cada disco ou box: montar a **capa completa da caixinha** (frente + lombada + verso) e o
   **label do disco**, em PDF pronto para imprimir.
-- Frente: pôster ou arte escolhida, título, logo. Lombada: título, número do disco, padrão visual
-  que forma uma imagem contínua quando os discos do box ficam lado a lado (desejável). Verso:
-  sinopse, lista de títulos/episódios, duração, áudio, legendas, perfil do disco.
-- Permitir escolher entre várias artes do TMDB para cada posição.
-- Saída em 300 DPI, CMYK opcional, com sangria e marcas de corte.
+- Frente: pôster ou arte escolhida e título (sem logo, decisão da Fase 5). Lombada: título,
+  número do disco, padrão visual que forma uma imagem contínua quando os discos do box ficam lado
+  a lado (desejável, Fase 7). Verso: sinopse, lista de títulos/episódios, duração, áudio,
+  legendas, perfil do disco.
+- Fase 5: uma arte só para a frente, escolhida numa grade com todas as do TMDB; o verso usa o
+  fundo do menu e o label também.
+- Saída em 300 DPI, sRGB (CMYK descartado na Fase 5), com sangria e marcas de corte.
 
 ---
 
@@ -311,7 +313,7 @@ validado com teste antes de virar padrão.
 | Frontend | **Jinja2 + HTMX + CSS próprio** (sem build; a Fase 4a manteve: o tema tem 3 ajustes, sem editor livre) |
 | Jobs | tabela `jobs` no SQLite + processo worker separado. Sem Celery/Redis a menos que fique necessário |
 | Mídia | `ffmpeg`/`ffprobe`, `dvdauthor`, `spumux`, `genisoimage`, `tsMuxeR`, `xorriso` |
-| Imagens e PDF | **Pillow** para menus e artes; **reportlab** para o PDF de impressão |
+| Imagens e PDF | **Pillow** para menus, capas e o PDF de impressão (sem reportlab, Fase 5) |
 | Metadados | **TMDB API** via `httpx2` (token no cabeçalho `Bearer`), detalhes confirmados guardados no banco |
 | Infra | **Docker** + **docker-compose**; CI no **GitHub Actions** |
 
@@ -368,7 +370,7 @@ src/projeto_dvd/
     dvd/          # mux, menus (MPEG-2 parado, spumux), dvdauthor XML, QA automática do ISO
     bluray/       # tsMuxeR meta, (menus após o spike)
   menus/          # páginas (pages), paleta e fundos (theme), geometria (layout), Pillow (render)
-  covers/         # layout de capa, lombada, verso, label, PDF
+  covers/         # medidas (sizes), conteúdo, opções de arte, layout em mm, render e PDF
   jobs/           # runner de processos, pipeline, fila (store), worker, arquivos do job
   db/             # modelos SQLModel, sessão, migrações
   app.py          # fábrica create_app (uvicorn --factory)
@@ -480,11 +482,11 @@ CLAUDE.md, inclusive a regra do travessão.
 
 ## 10. Capas: especificações
 
-- Saída: PDF em 300 DPI, sangria de 3 mm, marcas de corte, CMYK opcional.
-- **Medidas a confirmar** com a caixa e o papel comprados antes de fixar no código. Referências
-  comuns: capa de DVD (caixa Amaray) em torno de 273 x 183 mm com lombada de ~14 mm; capa de
-  Blu-ray menor e mais baixa; label de disco com 120 mm de diâmetro e furo central. As medidas
-  ficam num arquivo de configuração, nunca hardcoded.
+- Saída: PDF A4 em 300 DPI (sRGB, JPEG q95 sem subamostragem de cor), sangria de 3 mm, marcas
+  de corte e de dobra, régua de 50 mm e o aviso "Imprima em tamanho real" no pé da folha.
+- Medidas em `covers/sizes.py` (Fase 5), **a conferir** com a caixa e a folha compradas: caixa
+  Amaray 2 × 129,5 + 14 = 273 x 183 mm; etiqueta redonda Pimaco de 117 mm com furo de 41 mm, 2
+  por folha A4. Blu-ray fica para a Fase 6.
 - Texto da capa em português; usar a sinopse `pt-BR` do TMDB.
 - Pasta de artes (Fase 2): `OUTPUT_DIR/covers/<pasta do disco>/<Título (ano)>/` com `poster.jpg`,
   `backdrop.jpg`, `logo.png`, `metadata.json`; episódios em `<Série>/` com `S01E03.jpg` e
@@ -531,7 +533,8 @@ não mudam; a Fase 3 vem antes da 2 para ter um disco de verdade o quanto antes.
         legenda. Implementada; falta a QA no VLC e no player físico, no final do projeto.
   - [ ] **4b: Robustez.** Retomar job, cache do encode, cópia do vídeo de rip de DVD.
         Implementada; falta conferir com os rips reais do Vini (QA no final do projeto).
-- [ ] **Fase 5: Capas.** Composição frente/lombada/verso, label, PDF.
+- [ ] **Fase 5: Capas.** Composição frente/lombada/verso, label, PDF. Implementada; falta
+      imprimir uma de teste com a caixa e as etiquetas compradas.
 - [ ] **Fase 6: Blu-ray.** BDMV sem menu com perfil BD-25/BD-50 + spike de menus e decisão.
 - [ ] **Fase 7: Boxes.** Conjuntos de discos com perfis independentes, tema unificado, lombadas
       contínuas, assistente para dividir série.
@@ -560,7 +563,10 @@ não mudam; a Fase 3 vem antes da 2 para ter um disco de verdade o quanto antes.
   destaque (alfa da paleta do PNG virando contraste 5/15 e 9/15 no spumux).
 - **HDR/4K, PGS, VobSub, PAL:** fora da Fase 3; a receita de tonemap do `tech-lead-midia` está na
   spec da Fase 3.
-- **Medidas exatas das capas e do label:** confirmar com o material comprado.
+- **Medidas exatas das capas e do label:** confirmar com o material comprado (Fase 5: imprimir
+  uma folha de teste, conferir a régua de 50 mm, o encaixe na luva da caixa e o furo da
+  etiqueta). Durabilidade: tinta pigmentada ou impressão em gráfica; etiqueta adesiva pode
+  desequilibrar o disco em alta rotação (avaliar mídia printable).
 - **TMDB com o token real** (QA no final): a busca ignora acento ("Senhor dos Aneis" acha "Senhor
   dos Anéis")? O nome do episódio pt-BR vem mesmo como "Episódio N" quando falta tradução?
   Pôsteres `pt` incluem os de Portugal (o TMDB não separa o país).
@@ -618,6 +624,13 @@ _Atualizar ao fim de cada sessão._
   reais da cópia de rip, e `revisor-codigo`). Botão Retomar, cache do vídeo codificado por
   limite de espaço e cópia do vídeo de rips de DVD compatíveis. `make lint`, `make test` (100%)
   e `make test-slow` (24) verdes. Falta conferir a cópia com os rips reais do Vini.
+- 2026-10-17: PR #7 (Fase 4b) mergeado em `main`.
+- 2026-10-17: **Fase 5 implementada** na branch `feat/fase-5-capas` (spec e plano em
+  `docs/plans/2026-10-17-fase-5-capas*.md`, spec revisada por `designer`, `curador` e
+  `revisor-codigo`). Tela "Capa" da pasta: encarte da caixa Amaray (verso, lombada e frente) e
+  duas etiquetas redondas em A4, grade com as artes do TMDB, textos editáveis e PDF em
+  `OUTPUT_DIR/print/`. `make lint`, `make test` (100%) e `make test-slow` (28) verdes. Falta imprimir
+  uma de teste com o material comprado.
 - Os agentes de `.claude/agents/` só são reconhecidos pelo nome a partir de uma sessão nova; na
   sessão em que foram criados, rodam como agente genérico lendo o próprio arquivo.
 
@@ -773,4 +786,14 @@ _Atualizar ao fim de cada sessão._
   original (o ffprobe não mostra o pico real); capítulos levados ao GOP fechado (testado: o
   dvdauthor não corrige); GOP contado em campos exibidos (36); conferência logo depois de
   extrair e QA de vídeo idêntico.
-
+- 2026-10-17 (Fase 5): capa desenhada com o **Pillow** e o PDF salvo por ele (reportlab
+  descartado); A4 a 300 DPI, sRGB, sem CMYK e sem logo na frente (decisões do Vini). Medidas em
+  mm num arquivo só; as bordas dos painéis arredondadas uma vez (nenhuma coluna branca); o texto
+  medido sempre a 300 DPI, para a prévia de 50 DPI quebrar igual ao PDF.
+- 2026-10-17 (Fase 5): escolhas da capa dentro do `DiscChoices` (`cover`), preservadas pelo
+  formulário do Montar DVD; uma arte só na frente, baixada como `covers/<pasta>/front.jpg|png`;
+  opções listadas dos detalhes salvos, sem chamar a API (pôster da temporada ou da coleção
+  primeiro, depois pt, sem idioma e en; abaixo de 150 DPI fica fora). Pôster com idioma não
+  recebe o nome por cima.
+- 2026-10-17 (Fase 5): o aviso "Imprima em tamanho real" foi para o pé da folha (no alto cruzava
+  as marcas de dobra); o furo da etiqueta é pintado de branco no centro exato, com 1 px de folga.

@@ -31,6 +31,7 @@ class Image(BaseModel):
     iso_639_1: str | None = None
     vote_average: float = 0.0
     width: int = 0
+    height: int = 0  # Phase 5: the print resolution of a cover; 0 in details saved before
 
 
 class Images(BaseModel):
@@ -66,6 +67,7 @@ class Credits(BaseModel):
 class CollectionRef(BaseModel):
     id: int
     name: str
+    poster_path: ImagePath = None  # Phase 5: a cover option (absent in older saved details)
 
 
 class SearchResult(BaseModel):
@@ -136,6 +138,7 @@ class Episode(BaseModel):
 
 class Season(BaseModel):
     season_number: int
+    poster_path: ImagePath = None
     episodes: list[Episode] = []
 
 
@@ -149,6 +152,7 @@ class EpisodeDetails(BaseModel):
     show: Show
     episode: Episode
     episode_end: Episode | None = None
+    season_poster_path: ImagePath = None  # Phase 5: a cover option for a season disc
 
 
 Details = Annotated[MovieDetails | EpisodeDetails, Field(discriminator="kind")]

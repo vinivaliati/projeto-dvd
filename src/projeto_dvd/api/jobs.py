@@ -9,7 +9,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from sqlmodel import Session
 
 from projeto_dvd.api.deps import EngineDep, SessionDep, SettingsDep, templates
-from projeto_dvd.api.formatting import windows_path
+from projeto_dvd.api.formatting import output_display
 from projeto_dvd.authoring.dvd.qa import QaReport
 from projeto_dvd.config import Settings
 from projeto_dvd.db.models import Job
@@ -76,7 +76,7 @@ def job_view(session: Session, settings: Settings, job: Job, now: datetime) -> J
         and (now - created).total_seconds() > WORKER_GRACE_SECONDS,
         qa=QaReport.model_validate_json(job.qa_json) if job.qa_json else None,
         temp_bytes=0 if job.status in ACTIVE else temporary_bytes(settings.work_dir, job.id),
-        iso_display=_iso_display(settings, plan.iso_name),
+        iso_display=output_display(settings.host_output_dir, f"iso/{plan.iso_name}"),
         now=now, can_resume=_can_resume(session, job, plan),
     )  # fmt: skip
 
@@ -238,12 +238,6 @@ def _state(indices: list[int], current: int) -> Literal["done", "current", "todo
     if current in indices:
         return "current"
     return "todo"
-
-
-def _iso_display(settings: Settings, iso_name: str) -> str:
-    if settings.host_output_dir:
-        return windows_path(settings.host_output_dir, f"iso/{iso_name}")
-    return f"iso\\{iso_name} (na pasta HOST_OUTPUT_DIR do .env)"
 
 
 def _now() -> datetime:

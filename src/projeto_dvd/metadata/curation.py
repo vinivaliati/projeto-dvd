@@ -72,11 +72,12 @@ def fetch_details(choice: Choice, client: TmdbClient) -> Details:
     if choice.season is None or choice.episode is None:
         raise TmdbError(MISSING_EPISODE.format("?"))
     show = client.tv(choice.tmdb_id)
-    episode = _episode(client, choice.tmdb_id, choice.season, choice.episode)
+    episode, poster = _episode(client, choice.tmdb_id, choice.season, choice.episode)
     end = None
     if choice.episode_end:
-        end = _episode(client, choice.tmdb_id, choice.season, choice.episode_end)
-    return EpisodeDetails(kind="episode", show=show, episode=episode, episode_end=end)
+        end, _ = _episode(client, choice.tmdb_id, choice.season, choice.episode_end)
+    return EpisodeDetails(kind="episode", show=show, episode=episode, episode_end=end,
+                          season_poster_path=poster)  # fmt: skip
 
 
 def confirm(
@@ -152,13 +153,14 @@ def _save(
     """Art and metadata.json; failures become warnings, never undo the confirmation."""
     info = title_info(details)
     if details.kind == "movie":
-        name, metadata = movie_label(info.title, info.year), "metadata.json"
+        metadata = "metadata.json"
     else:
-        code = episode_code(details.episode.season_number, details.episode.episode_number)
-        name, metadata = info.show or details.show.name, f"{code}.json"
+        metadata = (
+            f"{episode_code(details.episode.season_number, details.episode.episode_number)}.json"
+        )
     warnings: list[str] = []
     try:
-        directory = art_dir(output_dir, folder, name)
+        directory = title_art_dir(output_dir, folder, details)
         directory.mkdir(parents=True, exist_ok=True)
         save_art(info.model_dump_json(indent=2).encode(), directory / metadata)
     except (OSError, ValueError):
@@ -179,10 +181,22 @@ def _save(
     return warnings
 
 
-def _episode(client: TmdbClient, tv_id: int, season: int, number: int) -> Episode:
+def title_art_dir(output_dir: Path, folder: str, details: Details) -> Path:
+    """Where the art of a confirmed title lives: the movie, or the series of an episode."""
+    info = title_info(details)
+    if details.kind == "movie":
+        return art_dir(output_dir, folder, movie_label(info.title, info.year))
+    return art_dir(output_dir, folder, info.show or details.show.name)
+
+
+def _episode(
+    client: TmdbClient, tv_id: int, season: int, number: int
+) -> tuple[Episode, str | None]:
+    """The episode, and the poster of its season (the same request)."""
     code = episode_code(season, number)
     try:
-        episodes = client.season(tv_id, season).episodes
+        found = client.season(tv_id, season)
+        episodes = found.episodes
     except TmdbError as error:
         if error.message != NOT_FOUND:
             raise
@@ -198,7 +212,7 @@ def _episode(client: TmdbClient, tv_id: int, season: int, number: int) -> Episod
                 "name": en.name if generic_episode_name(episode.name) else episode.name,
                 "overview": episode.overview or en.overview,
             })  # fmt: skip
-    return episode
+    return episode, found.poster_path
 
 
 def _label(details: Details) -> str:
@@ -239,12 +253,19 @@ def _duration(row: MediaFile) -> float | None:
     return summarize(json.loads(row.probe_json)).duration
 
 
-def confirmed_infos(session: Session, folder: str) -> dict[str, TitleInfo]:
-    """The confirmed TMDB match of each video of a folder, by path (menus and covers)."""
+def confirmed_details(session: Session, folder: str) -> dict[str, Details]:
+    """The stored TMDB details of each confirmed video of a folder, by path (cover art)."""
     return {
-        row.path: title_info(DETAILS.validate_json(row.title.tmdb_json))
+        row.path: DETAILS.validate_json(row.title.tmdb_json)
         for row in _folder_rows(session, folder)
         if row.title is not None
         and row.title.status == "confirmed"
         and row.title.tmdb_json is not None
+    }
+
+
+def confirmed_infos(session: Session, folder: str) -> dict[str, TitleInfo]:
+    """The confirmed TMDB match of each video of a folder, by path (menus and covers)."""
+    return {
+        path: title_info(details) for path, details in confirmed_details(session, folder).items()
     }

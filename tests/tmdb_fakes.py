@@ -60,6 +60,7 @@ def season(language: str = "pt-BR") -> dict[str, Any]:
     en = {1: "The Start", 2: "The Middle", 3: "The Thumb"}
     return {
         "season_number": 1,
+        "poster_path": "/seasonposter.jpg",
         "episodes": [
             {"season_number": 1, "episode_number": n,
              "name": en[n] if language.startswith("en") else names[n],

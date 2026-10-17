@@ -184,7 +184,7 @@ def _folder_action(
     tmdb: TmdbClient | None,
     action: Callable[[TmdbClient], str | None],
 ) -> HTMLResponse:
-    banner, error = _locked(session, tmdb, action)
+    banner, error = run_locked(session, tmdb, action)
     view = folder_view(session, media_dir, name, folder)
     context = {"folder": view, "tmdb": tmdb_context(session, view, tmdb is not None, banner, error)}
     return templates.TemplateResponse(request, "_tmdb_section.html", context)
@@ -198,11 +198,11 @@ def _card_action(
     action: Callable[[TmdbClient], None],
 ) -> HTMLResponse:
     _row(session, file_id)  # 404 before any TMDB call
-    _, error = _locked(session, tmdb, action)
+    _, error = run_locked(session, tmdb, action)
     return _render_card(request, session, file_id, tmdb is not None, error)
 
 
-def _locked(
+def run_locked(
     session: Session, tmdb: TmdbClient | None, action: Callable[[TmdbClient], str | None]
 ) -> tuple[str | None, str | None]:
     """(banner, error) of running one TMDB action under the lock."""

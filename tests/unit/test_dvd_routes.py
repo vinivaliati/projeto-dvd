@@ -19,7 +19,7 @@ from projeto_dvd.db.models import DiscProject, MediaFile, Title
 from projeto_dvd.jobs import pipeline, store
 from projeto_dvd.library.probe import ProbeResult
 from projeto_dvd.metadata.tmdb_models import DETAILS, Movie, MovieDetails
-from projeto_dvd.planner.disc_plan import DiscChoices, DiscPlan
+from projeto_dvd.planner.disc_plan import CoverChoices, DiscChoices, DiscPlan
 from tests.client import client_for
 from tests.tmdb_fakes import MOVIE as TMDB_MOVIE
 from tests.tree import make_file
@@ -630,3 +630,20 @@ def test_a_long_gop_found_when_generating_recodes_the_rip(
     assert response.status_code == 303
     plan = queued_plan(client, response.headers["location"])
     assert not plan.titles[0].copy_video and plan.video_kbps > 0
+
+
+def test_saving_the_disc_keeps_the_cover(client: TestClient) -> None:
+    scan(client)
+    cover = CoverChoices(front="/a.jpg", front_language="pt", spine_text="Lombada")
+    with Session(client.app.state.engine) as session:  # type: ignore[attr-defined]
+        base = DiscChoices.model_validate({"kind": "movies", "order": ["Filme/Filme.mkv"],
+                                           "profile": "dvd9", "audio": ["pt"], "subtitles": [],
+                                           "subtitle_on": None, "chapters": "every",
+                                           "minutes": 5, "cover": cover.model_dump()})  # fmt: skip
+        session.add(DiscProject(folder="Filme", choices_json=base.model_dump_json()))
+        session.commit()
+
+    client.post("/folders/Filme/dvd/choices", headers=SAME, data=disc_form(side="right"))
+
+    choices = saved(client)
+    assert choices is not None and choices.cover == cover and choices.theme.side == "right"

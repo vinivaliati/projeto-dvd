@@ -1,0 +1,12 @@
+<div id="cover-preview" class="cover-preview"{% if oob %} hx-swap-oob="true"{% endif %}>
+  <figure>
+    <img src="{{ url_for('cover_preview', name=disc.name | urlencode) }}?page=1&amp;v={{ cover.version }}"
+         alt="Prévia da capa: verso, lombada e frente" width="585" height="413">
+    <figcaption class="muted">Capa: verso, lombada e frente</figcaption>
+  </figure>
+  <figure class="cover-labels">
+    <img src="{{ url_for('cover_preview', name=disc.name | urlencode) }}?page=2&amp;v={{ cover.version }}"
+         alt="Prévia das etiquetas do disco" width="413" height="585">
+    <figcaption class="muted">Etiquetas do disco</figcaption>
+  </figure>
+</div>
