@@ -30,6 +30,7 @@ class TitleLoad:
     duration: float
     audio_kbps: tuple[int, ...]
     subtitles: int
+    video_bytes: int | None = None  # the video of a DVD rip, copied as it is
 
 
 @dataclass(frozen=True)
@@ -58,24 +59,37 @@ def estimate(
 
 
 def estimate_disc(profile: DiscProfile, titles: Sequence[TitleLoad], menu_pages: int) -> Estimate:
-    """One video bitrate for every title: the same quality from the first to the last."""
-    duration = sum(title.duration for title in titles)
-    if duration <= 0:
+    """One video bitrate for every encoded title: the same quality from the first to the last.
+
+    A copied video takes its own size; the encoded titles share what is left.
+    """
+    if sum(title.duration for title in titles) <= 0:
         raise ValueError("disc without duration")
     menus = menu_bytes(menu_pages)
-    other_kilobits = sum(title.duration * _other_kbps(title) for title in titles)
-    room_kilobits = (profile.usable_bytes - menus) * 8 / (1 + profile.mux_overhead) / 1000
-    maxrate = min(maxrate_kbps(profile, t.audio_kbps, t.subtitles) for t in titles)
-    video = int(min((room_kilobits - other_kilobits) / duration, VBR_HEADROOM * maxrate))
-    kilobits = sum(title.duration * (video + _other_kbps(title)) for title in titles)
-    size = kilobits * 1000 * (1 + profile.mux_overhead) / 8
-    return Estimate(
-        profile=profile,
-        video_kbps=video,
-        maxrate_kbps=maxrate,
-        size_bytes=int(size) + profile.reserve_bytes + menus,
-        quality=_quality(profile, video),
+    encoded = [title for title in titles if title.video_bytes is None]
+    copied_kilobits = sum(
+        (title.video_bytes or 0) * 8 / 1000 + title.duration * _other_kbps(title)
+        for title in titles
+        if title.video_bytes is not None
     )
+    room_kilobits = (profile.usable_bytes - menus) * 8 / (1 + profile.mux_overhead) / 1000
+    duration = sum(title.duration for title in encoded)
+    if encoded:
+        maxrate = min(maxrate_kbps(profile, t.audio_kbps, t.subtitles) for t in encoded)
+        other_kilobits = sum(title.duration * _other_kbps(title) for title in encoded)
+        free = room_kilobits - copied_kilobits - other_kilobits
+        video = int(min(free / duration, VBR_HEADROOM * maxrate)) if duration else 0
+    else:
+        maxrate = video = 0
+    kilobits = copied_kilobits + sum(t.duration * (video + _other_kbps(t)) for t in encoded)
+    size = int(kilobits * 1000 * (1 + profile.mux_overhead) / 8) + profile.reserve_bytes + menus
+    if encoded:
+        quality = _quality(profile, video)
+    else:  # only copies: the original quality, if it fits
+        fits = size <= profile.usable_bytes + profile.reserve_bytes
+        quality = Quality.GREAT if fits else Quality.DOES_NOT_FIT
+    return Estimate(profile=profile, video_kbps=video, maxrate_kbps=maxrate, size_bytes=size,
+                    quality=quality)  # fmt: skip
 
 
 def menu_bytes(pages: int) -> int:

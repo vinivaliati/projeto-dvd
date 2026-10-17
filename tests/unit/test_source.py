@@ -183,3 +183,33 @@ def test_top_field_first_from_frames(tops: tuple[int, ...], expected: bool) -> N
     probe = json.dumps({"frames": [{"top_field_first": top} for top in tops]})
 
     assert source.top_field_first_from_frames(probe) is expected
+
+
+def gop_frames(*gops: tuple[int, int], start: float = 0.0) -> list[dict[str, object]]:
+    """GOPs of (pictures, repeated fields), 1/30 s apart."""
+    result: list[dict[str, object]] = []
+    for pictures, repeated in gops:
+        for n in range(pictures):
+            time = f"{start + len(result) / 30:.4f}"
+            result.append({"key_frame": int(n == 0), "repeat_pict": int(n < repeated),
+                           "best_effort_timestamp_time": time})  # fmt: skip
+    return result
+
+
+def test_max_gop_fields_counts_the_repeated_fields() -> None:
+    sample = gop_frames((12, 6), (15, 7), (1, 0))  # a GOP counts once the next one starts
+    assert source.max_gop_fields(json.dumps({"frames": sample})) == 37
+    assert source.max_gop_fields(json.dumps({"frames": gop_frames((12, 0), (1, 0))})) == 24
+    assert source.max_gop_fields(json.dumps({"frames": gop_frames((12, 0))})) == 0
+
+
+def test_max_gop_fields_ignores_the_cut_gops_of_each_window() -> None:
+    first = gop_frames((5, 0), (12, 6), (1, 0))[1:]  # the window starts mid-GOP
+    second = gop_frames((20, 0), (12, 6), (1, 0), start=100.0)[3:]
+    assert source.max_gop_fields(json.dumps({"frames": first + second})) == 30
+
+
+def test_the_frame_scan_reads_key_frames_and_times() -> None:
+    entries = source.frame_scan_command(Path("/m/a.mkv"), 100.0)
+    shown = entries[entries.index("-show_entries") + 1]
+    assert "key_frame" in shown and "best_effort_timestamp_time" in shown

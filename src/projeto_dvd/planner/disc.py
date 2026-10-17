@@ -16,9 +16,10 @@ from projeto_dvd.library.scan import FolderView
 from projeto_dvd.metadata.details import TitleInfo, generic_episode_name
 from projeto_dvd.metadata.filename import Guess, guess
 from projeto_dvd.planner.disc_plan import UND, DiscChoices, Kind
-from projeto_dvd.planner.dvd_plan import SubtitleOption, subtitle_options
+from projeto_dvd.planner.dvd_plan import SubtitleOption, audio_output, subtitle_options
 from projeto_dvd.planner.languages import dvd_language, language_name
 from projeto_dvd.planner.profiles import PROFILES
+from projeto_dvd.planner.source import geometry
 
 MAX_TITLES = 60  # each title costs 2 of the 128 commands of the VMGM dispatcher
 MAX_LANGUAGES = 4  # each language page fits in large type
@@ -149,6 +150,68 @@ def missing_languages(title: DiscTitle, choices: DiscChoices) -> list[str]:
     subtitles = [f"sem legenda {language_name(lang)}" for lang in choices.subtitles
                  if best_subtitle(title, lang) is None]  # fmt: skip
     return audio + subtitles
+
+
+DVD_PEAK = 9_800_000  # bit/s, the DVD video ceiling written in the sequence header
+DVD_BUFFER = 1_835_008  # bits, the MP@ML VBV buffer
+SUBTITLE_PEAK_KBPS = 40
+MAX_GOP_FIELDS = 36  # the NTSC limit, counted in displayed fields (pulldown repeats fields)
+NOT_ENOUGH_ROOM = "as faixas escolhidas pedem mais espaço que o disco original"
+UNKNOWN_SIZE = "tamanho do vídeo desconhecido"
+REENCODE_CHECKED = "Recodificar os rips está marcado"
+
+
+def is_rip(title: DiscTitle) -> bool:
+    """MPEG-2 720x480 as a DVD carries it, with the sequence header of a DVD."""
+    video = title.summary.video
+    if video is None or video.codec != "mpeg2video" or (video.width, video.height) != (720, 480):
+        return False
+    if geometry(video).scale or video.dvd_header is None:
+        return False
+    peak, buffer = video.dvd_header
+    return peak <= DVD_PEAK and buffer <= DVD_BUFFER
+
+
+def video_size(title: DiscTitle) -> int | None:
+    """The bytes of the video stream: the MakeMKV tag, or the file minus its audio."""
+    video = title.summary.video
+    if video is None:
+        return None
+    if video.stream_bytes and video.stream_bytes < title.video.size:
+        return video.stream_bytes
+    duration = title.summary.duration or 0.0
+    if any(track.bit_rate is None for track in title.summary.audio):
+        return None
+    estimate = (
+        title.video.size - sum(track.bit_rate or 0 for track in title.summary.audio) * duration / 8
+    )
+    return int(estimate) if estimate > 0 else None
+
+
+def copy_reason(title: DiscTitle, choices: DiscChoices) -> str | None:
+    """Why a DVD rip is encoded again; None when its video is copied as it is.
+
+    The original disc already fitted the video in the 10.08 Mbps mux with its own audio and
+    subtitles; the copy keeps to that budget.
+    """
+    if choices.reencode_rips:
+        return REENCODE_CHECKED
+    found = [best_audio(title, language) for language in choices.audio]
+    tracks = {t.index: t for t in found if t is not None} or (
+        {title.summary.audio[0].index: title.summary.audio[0]} if title.summary.audio else {}
+    )
+    subtitles = {o.key for o in (best_subtitle(title, lang) for lang in choices.subtitles) if o}
+    needed = sum(audio_output(t).kbps for t in tracks.values()) + SUBTITLE_PEAK_KBPS * len(
+        subtitles
+    )
+    original = sum(
+        (t.bit_rate or 0) // 1000 for t in title.summary.audio
+    ) + SUBTITLE_PEAK_KBPS * sum(1 for s in title.summary.subtitles if s.codec == "dvd_subtitle")
+    if needed > original:
+        return NOT_ENOUGH_ROOM
+    if video_size(title) is None:
+        return UNKNOWN_SIZE
+    return None
 
 
 def track_warnings(titles: Sequence[DiscTitle], choices: DiscChoices) -> tuple[str, ...]:

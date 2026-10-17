@@ -29,6 +29,7 @@ from projeto_dvd.planner.source import (
     check_video,
     classify_frames,
     frame_scan_command,
+    max_gop_fields,
     top_field_first_from_frames,
 )
 
@@ -89,6 +90,7 @@ def prepare_title(title: DiscTitle, capture: Capture) -> TitleSource | tuple[str
         if not isinstance(result, VideoMode):  # VideoMode is a str too: test it first
             return (result,)
         mode, top_field_first = result, top_field_first_from_frames(frames)
+        return TitleSource(title, mode, top_field_first, max_gop_fields(frames))
     assert mode is not None
     return TitleSource(title, mode, top_field_first)
 

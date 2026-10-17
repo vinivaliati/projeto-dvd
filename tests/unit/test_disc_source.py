@@ -216,3 +216,13 @@ def test_suggested_disc_plan_that_does_not_fit(session: Session, tmp_path: Path)
     result = suggested_disc_plan(session, tmp_path, tmp_path, "F", tmp_path / "F", lambda c: "")
 
     assert result == ("O disco não cabe no DVD-9.",)
+
+
+def test_prepare_measures_the_gop_of_a_rip() -> None:
+    sample = [{"repeat_pict": r, "interlaced_frame": 0, "top_field_first": 1,
+               "key_frame": int(n % 12 == 0), "best_effort_timestamp_time": f"{n / 30:.4f}"}
+              for n, r in enumerate((1, 0) * 30)]  # fmt: skip
+
+    result = prepare_title(title(MPEG2, AUDIO), lambda c: json.dumps({"frames": sample}))
+
+    assert isinstance(result, TitleSource) and result.gop_fields == 30

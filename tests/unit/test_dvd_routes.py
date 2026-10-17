@@ -1,5 +1,6 @@
 import html
 import json
+import os
 import shutil
 from collections.abc import Iterator
 from pathlib import Path
@@ -545,3 +546,87 @@ def test_the_preflight_knows_the_cache_is_on(
     client.post("/folders/Filme/dvd", headers=SAME, data=disc_form())
 
     assert seen == [True]
+
+
+# DVD rips
+
+
+def as_rip(probe_data: dict[str, object], settings: Settings, size: int = 6 * 10**9,
+           tag: int = 4 * 10**9) -> None:  # fmt: skip
+    streams = probe_data["streams"]
+    assert isinstance(streams, list)
+    streams[0].update(
+        codec_name="mpeg2video", width=720, height=480, r_frame_rate="30000/1001",
+        avg_frame_rate="30000/1001", display_aspect_ratio="16:9",
+        tags={"NUMBER_OF_BYTES-eng": str(tag)},
+        side_data_list=[{"side_data_type": "CPB properties", "max_bitrate": 9800000,
+                         "buffer_size": 1835008}],
+    )  # fmt: skip
+    os.truncate(settings.media_dir / "Filme" / "Filme.mkv", size)  # sparse: a 6 GB rip
+
+
+def test_a_rip_shows_whether_its_video_is_copied(
+    client: TestClient, probe_data: dict[str, object], settings: Settings
+) -> None:
+    as_rip(probe_data, settings)
+    scan(client)
+
+    both = client.post("/folders/Filme/dvd/choices", headers=SAME, data=disc_form())
+    page_both = client.get("/folders/Filme/dvd").text
+    client.post(
+        "/folders/Filme/dvd/choices", headers=SAME, data=disc_form(audio=["pt"], subtitle=[])
+    )
+    page_pt = client.get("/folders/Filme/dvd").text
+
+    assert "recodificado: as faixas escolhidas pedem mais espaço que o disco original" in page_both
+    assert both.status_code == 200
+    assert "vídeo copiado do DVD" in page_pt and 'name="reencode_rips"' in page_pt
+    assert "usam os capítulos do DVD original" in page_pt
+
+
+def test_the_reencode_box_is_saved(
+    client: TestClient, probe_data: dict[str, object], settings: Settings
+) -> None:
+    as_rip(probe_data, settings)
+    scan(client)
+
+    client.post("/folders/Filme/dvd/choices", headers=SAME,
+                data=disc_form(audio=["pt"], subtitle=[], reencode_rips="1"))  # fmt: skip
+
+    choices = saved(client)
+    assert choices is not None and choices.reencode_rips
+    assert "recodificado: Recodificar os rips está marcado" in client.get("/folders/Filme/dvd").text
+
+
+def test_a_copy_that_does_not_fit_says_so(
+    client: TestClient, probe_data: dict[str, object], settings: Settings
+) -> None:
+    as_rip(probe_data, settings, size=12 * 10**9, tag=10 * 10**9)
+    scan(client)
+
+    client.post(
+        "/folders/Filme/dvd/choices", headers=SAME, data=disc_form(audio=["pt"], subtitle=[])
+    )
+
+    assert "Não cabe com o vídeo copiado" in client.get("/folders/Filme/dvd").text
+
+
+def test_a_long_gop_found_when_generating_recodes_the_rip(
+    client: TestClient, probe_data: dict[str, object], settings: Settings,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:  # fmt: skip
+    as_rip(probe_data, settings)
+    sample = [{"repeat_pict": r, "interlaced_frame": 0, "top_field_first": 1,
+               "key_frame": int(n % 15 == 0), "best_effort_timestamp_time": f"{n / 30:.4f}"}
+              for n, r in enumerate((1, 0) * 40)]  # fmt: skip
+    monkeypatch.setattr(dvd, "run_capture", lambda command: json.dumps({"frames": sample}))
+    dvd._frames.clear()
+    scan(client)
+
+    response = client.post("/folders/Filme/dvd", headers=SAME,
+                           data=disc_form(audio=["pt"], subtitle=[], confirm_low="1"),
+                           follow_redirects=False)  # fmt: skip
+
+    assert response.status_code == 303
+    plan = queued_plan(client, response.headers["location"])
+    assert not plan.titles[0].copy_video and plan.video_kbps > 0

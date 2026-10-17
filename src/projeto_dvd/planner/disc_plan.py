@@ -36,6 +36,7 @@ class DiscChoices(BaseModel):
     chapters: Literal["file", "every"]
     minutes: int
     theme: Theme = Theme()
+    reencode_rips: bool = False  # Phase 4b: DVD rips are copied unless this is checked
 
 
 class TitlePlan(BaseModel):
@@ -63,6 +64,10 @@ class TitlePlan(BaseModel):
     audio_map: tuple[int, ...]
     subtitle_map: tuple[int | None, ...]
     menu_name: str
+    # Phase 4b: the video of a DVD rip copied as it is, and its size (defaults keep the plans
+    # stored by phase 4a valid).
+    copy_video: bool = False
+    video_bytes: int | None = None
 
 
 Action = Literal[

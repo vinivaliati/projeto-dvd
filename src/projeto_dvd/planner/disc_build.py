@@ -16,13 +16,17 @@ from projeto_dvd.planner.calculator import (
     suggest_profile,
 )
 from projeto_dvd.planner.disc import (
+    MAX_GOP_FIELDS,
     DiscTitle,
     best_audio,
     best_subtitle,
     choice_errors,
+    copy_reason,
     disc_name,
+    is_rip,
     menu_name,
     strip_prefix,
+    video_size,
 )
 from projeto_dvd.planner.disc_plan import DiscChoices, DiscPlan, MenuPlan, TitlePlan
 from projeto_dvd.planner.dvd_plan import (
@@ -45,6 +49,7 @@ class TitleSource:
     title: DiscTitle
     mode: VideoMode
     top_field_first: bool
+    gop_fields: int | None = None  # the longest GOP of a DVD rip's frame sample, in fields
 
 
 def title_plan(source: TitleSource, choices: DiscChoices, name: str) -> TitlePlan:
@@ -62,6 +67,16 @@ def title_plan(source: TitleSource, choices: DiscChoices, name: str) -> TitlePla
     keys = {option.key: n for n, option in enumerate(chosen)}
     directory = PurePosixPath(source.title.path).parent
     shape = geometry(video)
+    copy = (
+        is_rip(source.title)
+        and copy_reason(source.title, choices) is None
+        and (source.gop_fields or 0) <= MAX_GOP_FIELDS
+    )
+    if copy:  # the cells of the original disc; a chapter every N minutes would land mid-GOP
+        file = summary.chapters
+        starts = plan_chapters(file, duration, "file", 1).starts if len(file) >= 2 else (0.0,)
+    else:
+        starts = plan_chapters(summary.chapters, duration, choices.chapters, choices.minutes).starts
     return TitlePlan(
         path=source.title.path, video_index=video.index, size=source.title.video.size,
         mtime_ns=source.title.video.mtime_ns, duration=duration, mode=source.mode,
@@ -76,11 +91,10 @@ def title_plan(source: TitleSource, choices: DiscChoices, name: str) -> TitlePla
             for t in tracks
         ),
         subtitles=tuple(_subtitle(option, directory) for option in chosen),
-        chapters=plan_chapters(summary.chapters, duration, choices.chapters,
-                               choices.minutes).starts,
+        chapters=starts,
         audio_map=audio_map,
         subtitle_map=tuple(keys[o.key] if o else None for o in options),
-        menu_name=name,
+        menu_name=name, copy_video=copy, video_bytes=video_size(source.title) if copy else None,
     )  # fmt: skip
 
 
@@ -113,7 +127,11 @@ def menu_plan(
 
 
 def disc_estimate(profile: DiscProfile, plans: Sequence[TitlePlan], menu_pages: int) -> Estimate:
-    loads = [TitleLoad(p.duration, tuple(a.kbps for a in p.audio), len(p.subtitles)) for p in plans]
+    loads = [
+        TitleLoad(p.duration, tuple(a.kbps for a in p.audio), len(p.subtitles),
+                  p.video_bytes if p.copy_video else None)
+        for p in plans
+    ]  # fmt: skip
     return estimate_disc(profile, loads, menu_pages)
 
 
