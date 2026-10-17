@@ -115,11 +115,11 @@ def test_show_overview_in_portuguese_or_english() -> None:
 
 
 def test_old_details_without_the_new_fields_still_load() -> None:
-    old = {"kind": "movie", "movie": {**MOVIE, "belongs_to_collection": {"id": 9, "name": "C"}}}
-    details = DETAILS.validate_python(old)
+    movie_json: dict[str, Any] = {**MOVIE, "belongs_to_collection": {"id": 9, "name": "C"}}
+    details = DETAILS.validate_python({"kind": "movie", "movie": movie_json})
     assert details.kind == "movie" and details.movie.belongs_to_collection is not None
     assert details.movie.belongs_to_collection.poster_path is None
-    with_poster = {**old["movie"], "belongs_to_collection": {"id": 9, "name": "C",
+    with_poster = {**movie_json, "belongs_to_collection": {"id": 9, "name": "C",
                                                              "poster_path": "/c.jpg"}}  # fmt: skip
     movie = DETAILS.validate_python({"kind": "movie", "movie": with_poster})
     assert movie.kind == "movie" and movie.movie.belongs_to_collection is not None
