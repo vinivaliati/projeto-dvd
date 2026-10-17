@@ -43,6 +43,9 @@ def start_codes(data: bytes | mmap.mmap, start: int = 0) -> Iterator[tuple[int, 
 
 def apply_soft_pulldown(path: Path, checkpoint: Callable[[], None] = lambda: None) -> int:
     """Patch a 23.976 stream in place to 29.97 with RFF flags; returns the pictures patched."""
+    if path.stat().st_nlink > 1:
+        # Editing in place would change the cached copy too (it is a hard link).
+        raise PulldownError("O vídeo está ligado ao cache; o ajuste de quadros foi recusado.")
     with path.open("r+b") as file, mmap.mmap(file.fileno(), 0) as data:
         return _patch(data, checkpoint)
 

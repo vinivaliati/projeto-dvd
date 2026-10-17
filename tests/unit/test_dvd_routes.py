@@ -529,3 +529,19 @@ def test_the_radios_check_their_language_on_the_page(client: TestClient) -> None
     page = client.get("/folders/Filme/dvd").text
 
     assert page.count("closest('.track').querySelector('input[type=checkbox]').checked = true") == 3
+
+
+def test_the_preflight_knows_the_cache_is_on(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    scan(client)
+    seen: list[bool] = []
+
+    def record(*args: Any, cache_on: bool = False) -> list[str]:
+        seen.append(cache_on)
+        return ["parado"]
+
+    monkeypatch.setattr(dvd, "preflight", record)
+    client.post("/folders/Filme/dvd", headers=SAME, data=disc_form())
+
+    assert seen == [True]

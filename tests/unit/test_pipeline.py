@@ -9,9 +9,11 @@ import pytest
 
 from projeto_dvd.authoring.dvd.qa import QaReport, required_tree
 from projeto_dvd.encode.mpeg2 import PulldownError, StreamReport
+from projeto_dvd.jobs import cache as cache_module
 from projeto_dvd.jobs import pipeline
 from projeto_dvd.jobs.files import cannot_write
 from projeto_dvd.jobs.pipeline import (
+    CacheUse,
     PipelineError,
     QaFailed,
     Step,
@@ -628,3 +630,97 @@ def test_a_4_3_menu_has_no_letterbox_buttons(
 
     spumux = [c for c in tools.commands if c[0] == "spumux"]
     assert [c[c.index("-s") + 1] for c in spumux] == ["0"]
+
+
+# Encode cache
+
+
+def cached_run(
+    dirs: tuple[Path, Path, Path], job: Path, cache_dir: Path, plan: DiscPlan | None = None,
+    limit: int = 10**12,
+) -> tuple[FakeTools, pipeline.PipelineResult]:  # fmt: skip
+    media, _, output = dirs
+    tools = FakeTools()
+    tools.plan = plan or make_movie()
+    use = CacheUse(work_dir=cache_dir, limit_bytes=limit, ffmpeg="7.1")
+    result = run_pipeline(tools.plan, media_dir=media, job_dir=job, output_dir=output,
+                          tools=tools, report=lambda step, fraction, title: None,
+                          should_cancel=lambda: False, cache=use)  # fmt: skip
+    return tools, result
+
+
+def test_a_zero_limit_turns_the_cache_off(dirs: tuple[Path, Path, Path], tmp_path: Path) -> None:
+    cached_run(dirs, tmp_path / "job1", tmp_path / "work", limit=0)
+
+    assert not (tmp_path / "work" / "cache").exists()
+
+
+def test_a_second_run_reuses_the_encoded_video(
+    dirs: tuple[Path, Path, Path], tmp_path: Path, no_pulldown: list[Path]
+) -> None:
+    cached_run(dirs, tmp_path / "job1", tmp_path / "work")
+    (dirs[2] / "iso" / "Filme.iso").unlink()
+
+    tools, result = cached_run(dirs, tmp_path / "job2", tmp_path / "work")
+
+    assert [c for c in tools.commands if "-pass" in c] == []
+    assert no_pulldown == [tmp_path / "job1" / "title1.m2v"]  # only the first run patched
+    assert result.qa_json is not None
+    assert QaReport.model_validate_json(result.qa_json).passed
+    assert "vídeo reaproveitado do cache" in (tmp_path / "job2" / "job.log").read_text()
+
+
+def test_a_leftover_link_to_the_cache_is_never_written_through(
+    dirs: tuple[Path, Path, Path], tmp_path: Path
+) -> None:
+    cached_run(dirs, tmp_path / "job1", tmp_path / "work")
+    entry = next((tmp_path / "work" / "cache").glob("*.m2v"))
+    original = entry.read_bytes()
+    job = tmp_path / "job2"
+    job.mkdir()
+    os.link(entry, job / "title1.m2v")  # left by a canceled job that hit the cache
+    (dirs[2] / "iso" / "Filme.iso").unlink()
+
+    cached_run(dirs, job, tmp_path / "work", make_movie(video_kbps=5000))  # another bitrate
+
+    assert entry.read_bytes() == original
+
+
+def test_a_cache_that_cannot_be_written_does_not_stop_the_job(
+    dirs: tuple[Path, Path, Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def broken(*args: object) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(cache_module, "store", broken)
+
+    _, result = cached_run(dirs, tmp_path / "job1", tmp_path / "work")
+
+    assert result.iso_path.exists()
+    assert "cache não gravado" in (tmp_path / "job1" / "job.log").read_text()
+
+
+def test_storing_trims_the_cache_to_its_limit(
+    dirs: tuple[Path, Path, Path], tmp_path: Path
+) -> None:
+    old = make_file(tmp_path / "work" / "cache" / f"{'0' * 64}.m2v", b"x" * 50)
+    make_file(tmp_path / "work" / "cache" / f"{'0' * 64}.json", b'{"size": 50, "progress": {}}')
+    os.utime(old, (1, 1))
+    cached_run(dirs, tmp_path / "job", tmp_path / "work", limit=1)
+
+    assert not old.exists()
+    assert len(list((tmp_path / "work" / "cache").glob("*.m2v"))) == 1  # the job's own
+
+
+def test_preflight_asks_for_more_room_with_the_cache(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    usage = shutil.disk_usage(tmp_path)
+    monkeypatch.setattr(shutil, "disk_usage", lambda path: usage._replace(free=25 * 10**9))
+    (tmp_path / "out").mkdir()
+
+    without = preflight(tmp_path, tmp_path / "out", 8 * 10**9, "x.iso", False)
+    with_cache = preflight(tmp_path, tmp_path / "out", 8 * 10**9, "x.iso", False, cache_on=True)
+
+    assert without == []
+    assert "Falta espaço na pasta de trabalho" in with_cache[0]

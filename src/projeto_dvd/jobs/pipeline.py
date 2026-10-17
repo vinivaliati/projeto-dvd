@@ -70,6 +70,8 @@ from projeto_dvd.db.session import make_engine, migrate
 from projeto_dvd.encode.audio import audio_command
 from projeto_dvd.encode.mpeg2 import PulldownError, apply_soft_pulldown, inspect_stream
 from projeto_dvd.encode.video import m2v_path, video_pass_command
+from projeto_dvd.jobs import cache as jobs_cache
+from projeto_dvd.jobs.cache import cache_key, plan_keys
 from projeto_dvd.jobs.files import cannot_write
 from projeto_dvd.jobs.runner import Canceled, ProcessRunner, RunResult, ToolError, Tools
 from projeto_dvd.library.files import list_disc_folders
@@ -171,6 +173,15 @@ class PipelineResult:
 
 
 @dataclass(frozen=True)
+class CacheUse:
+    """Where the encoded video is kept and how much of it (0 turns the cache off)."""
+
+    work_dir: Path
+    limit_bytes: int
+    ffmpeg: str | None
+
+
+@dataclass(frozen=True)
 class TitleResult:
     """What the QA needs from the encode of one title."""
 
@@ -210,6 +221,7 @@ def run_pipeline(
     tools: Tools,
     report: Report,
     should_cancel: Callable[[], bool],
+    cache: CacheUse | None = None,
 ) -> PipelineResult:
     menu = plan.menu
     if menu is None:
@@ -228,8 +240,10 @@ def run_pipeline(
         if should_cancel():
             raise Canceled
 
+    if cache is not None and not cache.limit_bytes:
+        cache = None
     results = [
-        _encode_title(plan, number, media_dir, job_dir, tools, begin, checkpoint)
+        _encode_title(plan, number, media_dir, job_dir, tools, begin, checkpoint, cache)
         for number in range(1, len(plan.titles) + 1)
     ]
     progress = begin(Step.MENUS)
@@ -282,10 +296,39 @@ def _encode_title(
     tools: Tools,
     begin: Callable[[Step, int], Callable[[float], None]],
     checkpoint: Callable[[], None],
+    cache: CacheUse | None,
 ) -> TitleResult:
     title = plan.titles[number - 1]
     source = media_dir / title.path
     _check_source(source, title)
+    m2v = m2v_path(job_dir, number)
+    # A video left by a job that hit the cache is a hard link to it: never write through it.
+    m2v.unlink(missing_ok=True)
+    key = cache_key(plan, number, cache.ffmpeg) if cache else ""
+    cached = jobs_cache.lookup(cache.work_dir, key, m2v) if cache else None
+    if cached is not None:
+        _note(job_dir, f"Título {number}: vídeo reaproveitado do cache.")
+        for step in (Step.VIDEO_PASS1, Step.VIDEO_PASS2):
+            begin(step, number)(1.0)
+        pass2 = cached
+    else:
+        pass2 = _encode_video(plan, number, source, job_dir, tools, begin, checkpoint)
+        if cache is not None:
+            _keep(plan, number, key, m2v, pass2, job_dir, cache)
+    return _finish_title(plan, number, source, media_dir, job_dir, tools, begin, pass2)
+
+
+def _encode_video(
+    plan: DiscPlan,
+    number: int,
+    source: Path,
+    job_dir: Path,
+    tools: Tools,
+    begin: Callable[[Step, int], Callable[[float], None]],
+    checkpoint: Callable[[], None],
+) -> RunResult:
+    """Both passes and, for film, the soft pulldown."""
+    title = plan.titles[number - 1]
     m2v = m2v_path(job_dir, number)
     pass2 = RunResult({}, "")
     for pass_number, step in ((1, Step.VIDEO_PASS1), (2, Step.VIDEO_PASS2)):
@@ -303,6 +346,34 @@ def _encode_title(
             apply_soft_pulldown(m2v, checkpoint)
         except PulldownError as error:
             raise PipelineError(str(error), Step.PULLDOWN) from error
+    return pass2
+
+
+def _keep(
+    plan: DiscPlan, number: int, key: str, m2v: Path, pass2: RunResult, job_dir: Path,
+    cache: CacheUse,
+) -> None:  # fmt: skip
+    """Keep the new video and trim the cache; a cache problem never stops the job."""
+    try:
+        jobs_cache.store(cache.work_dir, key, m2v, pass2)
+        jobs_cache.evict(cache.work_dir, cache.limit_bytes, plan_keys(plan, cache.ffmpeg))
+    except OSError as error:
+        _note(job_dir, f"Título {number}: cache não gravado ({error}).")
+
+
+def _finish_title(
+    plan: DiscPlan,
+    number: int,
+    source: Path,
+    media_dir: Path,
+    job_dir: Path,
+    tools: Tools,
+    begin: Callable[[Step, int], Callable[[float], None]],
+    pass2: RunResult,
+) -> TitleResult:
+    """Audio, mux and subtitles of one title, whatever the video came from."""
+    title = plan.titles[number - 1]
+    m2v = m2v_path(job_dir, number)
     progress = begin(Step.AUDIO, number)
     for track, audio in enumerate(title.audio, start=1):
         with _tool_step(Step.AUDIO):
@@ -439,9 +510,18 @@ def _render_subtitle(
 
 
 def preflight(
-    work_dir: Path, output_dir: Path, estimated_bytes: int, iso_name: str, replace: bool
+    work_dir: Path,
+    output_dir: Path,
+    estimated_bytes: int,
+    iso_name: str,
+    replace: bool,
+    cache_on: bool = False,
 ) -> list[str]:
-    """Problems to show on the form before a job is created."""
+    """Problems to show on the form before a job is created.
+
+    The work folder holds about twice the disc; with the cache, three times (the cached video
+    keeps its blocks while the program streams and the ISO exist).
+    """
     errors = []
     for label, folder in (("pasta de trabalho", work_dir), ("pasta de saída", output_dir)):
         if not _writable(folder):
@@ -449,7 +529,7 @@ def preflight(
     if errors:
         return errors
     for label, folder, needed in (
-        ("pasta de trabalho", work_dir, 2 * estimated_bytes + GIB),
+        ("pasta de trabalho", work_dir, (3 if cache_on else 2) * estimated_bytes + GIB),
         ("pasta de saída", output_dir, estimated_bytes + 100 * 1024 * 1024),
     ):
         free = shutil.disk_usage(folder).free
@@ -461,6 +541,12 @@ def preflight(
     if (output_dir / "iso" / iso_name).exists() and not replace:
         errors.append(ISO_EXISTS_FORM)
     return errors
+
+
+def _note(job_dir: Path, text: str) -> None:
+    """A line of the app in the job log, between the tool outputs."""
+    with (job_dir / "job.log").open("a", encoding="utf-8") as log:
+        log.write(f"[projeto-dvd] {text}\n")
 
 
 def _check_source(source: Path, plan: TitlePlan) -> None:

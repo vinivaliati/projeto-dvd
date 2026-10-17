@@ -12,6 +12,7 @@ import time
 import traceback
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 
 from sqlalchemy import Engine
@@ -19,8 +20,10 @@ from sqlmodel import Session
 
 from projeto_dvd.config import Settings
 from projeto_dvd.db.session import is_migrated, make_engine
-from projeto_dvd.jobs import store
+from projeto_dvd.jobs import cache, store
 from projeto_dvd.jobs.pipeline import (
+    GIB,
+    CacheUse,
     PipelineError,
     QaFailed,
     Step,
@@ -31,9 +34,10 @@ from projeto_dvd.jobs.pipeline import (
 from projeto_dvd.jobs.runner import Canceled, ProcessRunner, Tools
 from projeto_dvd.jobs.store import JobStatus
 from projeto_dvd.planner.disc_plan import DiscPlan
+from projeto_dvd.tools import detect_versions
 
-RESTARTED = "O worker reiniciou no meio da geração. Gere de novo."
-STOPPED = "O worker foi parado (docker compose stop) no meio da geração. Gere de novo."
+RESTARTED = "O worker parou no meio (o WSL ou o PC reiniciou?). Use Retomar."
+STOPPED = "O worker foi parado (docker compose stop) no meio da geração. Use Retomar."
 UNEXPECTED = "Erro inesperado na geração. Veja os detalhes técnicos no log."
 SAVE_EVERY = 1.0
 CANCEL_EVERY = 1.0
@@ -75,6 +79,11 @@ class Worker:
             plan = DiscPlan.model_validate_json(job.plan_json)
         job_dir = self.settings.work_dir / "jobs" / str(job_id)
         job_dir.mkdir(parents=True, exist_ok=True)
+        with (job_dir / "job.log").open("a", encoding="utf-8") as job_log:
+            job_log.write(f"[projeto-dvd] Início em {datetime.now(UTC).isoformat()}\n")
+        use = self.cache_use()
+        keys = cache.plan_keys(plan, use.ffmpeg)
+        cache.evict(use.work_dir, use.limit_bytes, keys)
         should_cancel = self._cancel_check(job_id)
         report = self._reporter(job_id, plan)
         try:
@@ -82,7 +91,7 @@ class Worker:
                 plan, media_dir=self.settings.media_dir, job_dir=job_dir,
                 output_dir=self.settings.output_dir,
                 tools=self.make_tools(job_dir, should_cancel), report=report,
-                should_cancel=should_cancel,
+                should_cancel=should_cancel, cache=use,
             )  # fmt: skip
         except Canceled:
             if self.stop.is_set():
@@ -90,6 +99,7 @@ class Worker:
             else:
                 store.finish(self.engine, job_id, JobStatus.CANCELED)
         except QaFailed as error:
+            cache.purge(use.work_dir, keys)  # a retry must not reuse the rejected video
             store.finish(self.engine, job_id, JobStatus.FAILED, error=error.message,
                          qa_json=error.report.model_dump_json())  # fmt: skip
         except PipelineError as error:
@@ -103,6 +113,13 @@ class Worker:
             store.finish(self.engine, job_id, JobStatus.DONE, qa_json=result.qa_json,
                          iso_path=str(result.iso_path))  # fmt: skip
         return True
+
+    def cache_use(self) -> CacheUse:
+        return CacheUse(
+            work_dir=self.settings.work_dir,
+            limit_bytes=int(self.settings.cache_limit_gb * GIB),
+            ffmpeg=detect_versions().get("ffmpeg"),
+        )
 
     def _cancel_check(self, job_id: int) -> Callable[[], bool]:
         last, answer = [-math.inf], [False]

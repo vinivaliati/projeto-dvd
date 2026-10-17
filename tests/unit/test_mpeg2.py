@@ -1,7 +1,9 @@
+import os
 from pathlib import Path
 
 import pytest
 
+from projeto_dvd.encode import mpeg2
 from projeto_dvd.encode.mpeg2 import (
     PulldownError,
     apply_soft_pulldown,
@@ -136,3 +138,12 @@ def test_inspection_counts_gops_and_parity_breaks() -> None:
     assert report.max_gop == 3
     assert report.aspect_codes == {3}
     assert report.parity_breaks == 1  # after T+RFF the next picture must start on the bottom
+
+
+def test_pulldown_refuses_a_file_linked_to_the_cache(tmp_path: Path) -> None:
+    m2v = tmp_path / "title1.m2v"
+    m2v.write_bytes(b"\x00\x00\x01\xb3" + b"\x00" * 16)
+    os.link(m2v, tmp_path / "cache.m2v")
+
+    with pytest.raises(mpeg2.PulldownError, match="cache"):
+        mpeg2.apply_soft_pulldown(m2v)

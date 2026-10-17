@@ -230,7 +230,8 @@ async def create_dvd(
         menu = disc_menu(choices, disc.titles, name, settings.output_dir)
         plan = build_disc_plan(name, sources, choices, menu, confirm_low, replace_iso)
         errors = preflight(settings.work_dir, settings.output_dir, plan.estimated_bytes,
-                           plan.iso_name, replace_iso)  # fmt: skip
+                           plan.iso_name, replace_iso,
+                           cache_on=settings.cache_limit_gb > 0)  # fmt: skip
     if errors:
         return _render(request, "dvd_form.html", settings, disc, choices, errors,
                        confirm_low=confirm_low, replace_iso=replace_iso)  # fmt: skip
