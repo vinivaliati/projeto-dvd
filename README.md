@@ -11,7 +11,8 @@ The goal is a physical collection meant to last: discs that follow the official 
 BDMV specifications closely enough to play on an ordinary player 20 years from now, with menus
 simple enough for a child or a grandparent to use with just the remote.
 
-> **Status:** Phase 4a (disc builder and DVD menus). Each video of a disc folder is matched
+> **Status:** Phase 4b (resume, encode cache, DVD rip copy) on top of 4a (disc builder and
+> DVD menus). Each video of a disc folder is matched
 > with TMDB (movie or episode, pt-BR data and art), and the whole folder becomes a DVD-Video
 > ISO with menus (movies, or a season with "play all"), checked automatically before it
 > reaches the output folder. See the roadmap in [`CLAUDE.md`](CLAUDE.md) (in Portuguese).
@@ -117,6 +118,21 @@ playing until the end of the disc) and the language pages. "Áudio" and "Legenda
 of their own with a check mark on the language that is on. A movie returns to its own page and
 button; the Menu and Title keys of the remote always go back to the main menu.
 
+**Resume, the cache and DVD rips:**
+
+- **Resume:** a job that stopped in the middle (WSL or the PC restarted, no space, canceled)
+  has a **Retomar** button. It runs the same plan again, and the titles already encoded come
+  from the cache.
+- **Cache:** the MPEG-2 video of each encoded title stays in `HOST_WORK_DIR/cache` (a hard
+  link, no copy), keyed by the encode command itself. Rebuilding a disc with another menu,
+  order or chapters skips the encode. The oldest entries leave above `CACHE_LIMIT_GB`
+  (default 50; 0 turns it off); the Jobs page shows the size and cleans it.
+- **DVD rips:** the MPEG-2 video of a DVD rip (720x480 with the DVD sequence header) is copied
+  byte for byte instead of encoded again, when the chosen audio fits the room the original disc
+  had. Its chapters are the ones of the rip, moved to the nearest closed GOP; the job checks the
+  stream right after extracting it, and the QA checks the video on the disc is identical. "Recodificar
+  os rips" turns it off for a disc.
+
 How it works, briefly:
 
 - **Video:** MPEG-2 in two passes (never `-target ntsc-dvd`, which duplicates frames);
@@ -127,8 +143,8 @@ How it works, briefly:
   button stream for 4:3 TVs that letterbox it. Each page is one second of still MPEG-2 with
   silent AC-3.
 - **Navigation:** `dvdauthor` with one titleset per title (each declares exactly its own
-  tracks) and every jump through the VMGM, where two command-only PGCs dispatch the next title
-  and the page to show. GPRMs keep the languages, the next episode and the highlighted
+  tracks) and every jump through the VMGM, where three command-only PGCs open the main page,
+  dispatch the next title and show the page the viewer was on. GPRMs keep the languages, the next episode and the highlighted
   button. A disc takes up to 60 titles (the dispatcher fits in the 128 commands of one PGC).
 - **ISO:** `genisoimage -dvd-video -udf`.
 - **Tests:** the slow tests author real discs and drive them with libdvdnav, the navigation
@@ -139,9 +155,9 @@ progressive, 59.94, variable frame rate, 1080i, image subtitles (PGS, VobSub) an
 chapter menus and video menus. For a movie whose Portuguese subtitle is an image, put an `.srt`
 next to it.
 
-The work folder needs about **twice the disc size** free (about 18 GB for a DVD-9): each
-intermediate file is deleted as soon as the next step succeeds, and **Apagar arquivos
-temporários** on the job page removes what is left.
+The work folder needs about **three times the disc size** free with the cache on (about 27 GB
+for a DVD-9; twice without it): each intermediate file is deleted as soon as the next step
+succeeds, and **Apagar arquivos temporários** on the job page removes what is left.
 
 ## Stack
 

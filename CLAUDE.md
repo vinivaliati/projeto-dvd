@@ -167,8 +167,11 @@ Uma tarefa só está pronta quando:
 ### 3.5 Geração do disco
 - Fila de jobs: encode → render do menu → authoring → `.iso`.
 - Progresso em tempo real (lido da saída do ffmpeg), tempo estimado, log completo de cada etapa.
-- Cancelar job (Fase 3). Retomar job e reaproveitar um título já codificado com os mesmos
-  parâmetros ficam para a Fase 4b.
+- Cancelar job (Fase 3). Fase 4b (feito): **Retomar** (o mesmo job volta à fila, depois do
+  preflight e da limpeza da pasta) e o **cache do vídeo codificado** em `WORK_DIR/cache` (hard
+  link do `.m2v` depois do pulldown, chave = sha256 do comando da 2ª passada, da origem, da
+  versão do ffmpeg e da `PULLDOWN_VERSION`; despejo pelo uso mais antigo, só no worker, acima de
+  `CACHE_LIMIT_GB`; uma QA reprovada apaga o vídeo do cache).
 - Antes de começar, checar o espaço livre na pasta de trabalho (um BD-50 pode precisar de >100 GB
   de intermediários).
 - Limpar os intermediários ao final, **com confirmação**.
@@ -255,6 +258,15 @@ validado com teste antes de virar padrão.
     mostra a página do `g5`; páginas a partir do menu 4. Registradores só g0 a g12 (g14 e g15
     são do dvdauthor); `button = 1024 × n`;
   - **até 60 títulos**: o despachante custa 2 comandos por título, e uma PGC aceita 128.
+- **Cópia do rip de DVD** (Fase 4b): MPEG-2 720x480 sem escala, com o sequence header de DVD
+  ("CPB properties": `max_bitrate ≤ 9,8 Mbps`, `buffer ≤ 1.835.008`), copiado byte a byte
+  quando o áudio escolhido cabe no orçamento do disco original (Σ kbps escolhidos + 40 por
+  legenda ≤ Σ kbps do arquivo + 40 por VobSub) e o tamanho é conhecido (tag `NUMBER_OF_BYTES`
+  do MakeMKV, ou arquivo menos áudio). GOP até **36 campos exibidos** (a amostra de quadros ao
+  gerar e a conferência logo depois de extrair recusam acima). Capítulos do rip, levados ao GOP
+  **fechado** mais próximo (até 1 s; o dvdauthor põe a célula em GOP aberto sem avisar, e pular
+  para ela mostra blocos). Underflow no mux de um título copiado para o job na hora. A QA confere
+  o vídeo idêntico (sha256), GOP e células, e as quebras de campo iguais às do original (aviso).
 - Ferramentas: `ffmpeg` para o encode, `dvdauthor` para VIDEO_TS e navegação, `spumux` para
   botões e legendas, `genisoimage -dvd-video -udf` para o ISO (ver Log de decisões: o `xorriso`
   não gera a ponte UDF 1.02 que o DVD-Video exige).
@@ -323,6 +335,7 @@ ALLOWED_HOSTS=["localhost","127.0.0.1"]   # Fase 3; hosts aceitos (TrustedHost)
 HOST_OUTPUT_DIR=                # Fase 3; o compose repassa ao web só para mostrar o caminho do ISO no Windows
 TMDB_TOKEN=                     # Fase 2; o "Token de leitura da API" (Bearer); vazio desliga a curadoria
 TMDB_LANGUAGE=pt-BR             # Fase 2; o compose repassa as duas só ao web
+CACHE_LIMIT_GB=50               # Fase 4b; vídeo codificado guardado (GB decimais); 0 desliga
 ```
 
 ### 6.2 Docker
@@ -392,7 +405,8 @@ Em paralelo: `artes → composição da capa → PDF`.
 - `Job` (tabela `job`, Fase 3): uma geração de disco; o `DiscPlan` inteiro em `plan_json` (um
   `TitlePlan` por vídeo e o `MenuPlan` com as páginas; jobs da Fase 3 convertidos pela migração
   `0004`), status, etapa (`"2:video_pass2"` por título), progresso, erro, QA e caminho do ISO;
-  log em `WORK_DIR/jobs/<id>/job.log`. Hash para reaproveitar encode fica para a Fase 4b.
+  log em `WORK_DIR/jobs/<id>/job.log`. Fase 4b: retomar devolve o mesmo job à fila; o cache
+  do vídeo (`WORK_DIR/cache/<chave>.m2v` e `.json`) não tem tabela no banco.
 - `ArtAsset`: arte baixada; tipo (poster, backdrop, logo, still), caminho, origem, idioma.
 - `CoverLayout`: escolhas de arte e texto de uma capa, e o PDF gerado.
 
@@ -438,6 +452,9 @@ CLAUDE.md, inclusive a regra do travessão.
   argumentos gerada, sem rodar o ffmpeg), geração do XML do dvdauthor, layout de capa (medidas).
 - **Integração**: gerar clipes de 10 a 30 s com `ffmpeg -f lavfi` (testsrc + sine), montar um
   disco de verdade e validar a estrutura. Marcar como `@pytest.mark.slow` e rodar no CI.
+- **Cache, retomar e cópia** (Fase 4b): os testes `slow` montam o mesmo disco duas vezes (a
+  segunda sem nenhuma passada), retomam um job cancelado no título 2 e copiam um rip estilo DVD
+  comercial (GOPs abertos, capítulos no meio de GOP), com o vídeo do ISO idêntico ao do rip.
 - **Navegação** (Fase 4a): os testes `slow` navegam o ISO com a **libdvdnav** (a VM do VLC, via
   `ctypes`, só na imagem de teste): inserir abre o menu, "Tocar todos" encadeia, Title e Menu
   voltam ao principal, a escolha de idioma vale no título, o filme volta à página dele. Os
@@ -512,8 +529,8 @@ não mudam; a Fase 3 vem antes da 2 para ter um disco de verdade o quanto antes.
 - [ ] **Fase 4: Montador + menus DVD.** Dividida em duas entregas (2026-10-16):
   - [ ] **4a: Montador + menus.** Vários títulos, episódios, menus com tema, páginas de áudio e
         legenda. Implementada; falta a QA no VLC e no player físico, no final do projeto.
-  - [ ] **4b: Robustez.** Retomar job, reaproveitar encode, copiar o vídeo de rip de DVD sem
-        recodificar.
+  - [ ] **4b: Robustez.** Retomar job, cache do encode, cópia do vídeo de rip de DVD.
+        Implementada; falta conferir com os rips reais do Vini (QA no final do projeto).
 - [ ] **Fase 5: Capas.** Composição frente/lombada/verso, label, PDF.
 - [ ] **Fase 6: Blu-ray.** BDMV sem menu com perfil BD-25/BD-50 + spike de menus e decisão.
 - [ ] **Fase 7: Boxes.** Conjuntos de discos com perfis independentes, tema unificado, lombadas
@@ -534,7 +551,10 @@ não mudam; a Fase 3 vem antes da 2 para ter um disco de verdade o quanto antes.
 - **Volume `data`:** a checagem de escrita da Fase 3 cobre `/work` e `/output` (o formulário
   explica o `chown`); o `/data` falha de forma explícita na migração do startup. O volume mantém
   o dono antigo se já existia ou se o `UID` da imagem mudar.
-- **Copiar o vídeo de um rip de DVD sem recodificar** (evita perder uma geração): Fase 4b.
+- **Cópia de rip com os rips reais** (Fase 4b, QA no final): o nome exato da tag de tamanho do
+  MakeMKV (ver o `probe_json` no banco); o maior GOP em campos de 3 rips de filme (se 37 ou 38
+  forem comuns, rever o limite de 36); se o `dvdvideo` devolve bytes idênticos num título de
+  várias células; pular de capítulo num título copiado no player físico.
 - **Menus no player físico** (Fase 4a, testados só na libdvdnav): a camada letterbox numa TV
   4:3, a PGC só de comandos (despachantes e menu raiz) e o contraste parcial da faixa de
   destaque (alfa da paleta do PNG virando contraste 5/15 e 9/15 no spumux).
@@ -592,6 +612,12 @@ _Atualizar ao fim de cada sessão._
   título, QA por título e por página de menu. `make lint`, `make test` (100% de cobertura) e
   `make test-slow` (19, com a navegação na libdvdnav) verdes; tela conferida em 375 px e 1100
   px. Falta a QA manual no VLC e no player físico (no final do projeto).
+- 2026-10-16: PR #6 (Fase 4a) mergeado em `main`.
+- 2026-10-17: **Fase 4b implementada** na branch `feat/fase-4b-robustez` (spec e plano em
+  `docs/plans/2026-10-17-fase-4b-robustez*.md`, spec revisada por `tech-lead-midia`, com testes
+  reais da cópia de rip, e `revisor-codigo`). Botão Retomar, cache do vídeo codificado por
+  limite de espaço e cópia do vídeo de rips de DVD compatíveis. `make lint`, `make test` (100%)
+  e `make test-slow` (24) verdes. Falta conferir a cópia com os rips reais do Vini.
 - Os agentes de `.claude/agents/` só são reconhecidos pelo nome a partir de uma sessão nova; na
   sessão em que foram criados, rodam como agente genérico lendo o próprio arquivo.
 
@@ -733,4 +759,18 @@ _Atualizar ao fim de cada sessão._
   ausente; título sem nenhum idioma escolhido toca a própria primeira faixa.
 - 2026-10-16 (Fase 4a): navegação testada com a libdvdnav (a VM do VLC) nos testes `slow`;
   o player físico continua sendo o teste final.
+- 2026-10-17 (Fase 4b): cache do vídeo codificado por **limite de espaço** (`CACHE_LIMIT_GB`,
+  padrão 50, GB decimais), mais antigos saem primeiro, só o worker despeja; hard link (sem
+  cópia); chave pelo próprio comando da 2ª passada (mais a versão do ffmpeg e a do patcher);
+  a QA continua com o `progress` da 2ª passada guardado no JSON. Reserva fixa dos menus
+  (`max(páginas, 20) × 2 MiB`) para o bitrate não mudar com o menu. Com o cache, o preflight pede
+  3 vezes o disco na pasta de trabalho.
+- 2026-10-17 (Fase 4b): job parado fica com o botão **Retomar** (decisão do Vini: nada volta
+  sozinho para a fila); retomar roda o preflight, limpa a pasta do job e volta o mesmo job à
+  fila num `UPDATE` atômico; só o último job da pasta, e não os da Fase 3. Sem migração nova.
+- 2026-10-17 (Fase 4b): rip de DVD **copiado quando cabe** (decisão do Vini), com "Recodificar
+  os rips" por disco. A regra do pico de bitrate foi trocada pelo orçamento herdado do disco
+  original (o ffprobe não mostra o pico real); capítulos levados ao GOP fechado (testado: o
+  dvdauthor não corrige); GOP contado em campos exibidos (36); conferência logo depois de
+  extrair e QA de vídeo idêntico.
 

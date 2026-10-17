@@ -11,7 +11,8 @@ O objetivo é uma coleção física feita para durar: discos que seguem as espec
 de DVD-Video e BDMV à risca, para tocar num player comum daqui a 20 anos, com menus simples o
 bastante para uma criança ou um avô usarem só com o controle remoto.
 
-> **Status:** Fase 4a (montador e menus de DVD). Cada vídeo de uma pasta de disco ganha o
+> **Status:** Fase 4b (retomar, cache de encode, cópia de rip de DVD) sobre a 4a (montador e
+> menus de DVD). Cada vídeo de uma pasta de disco ganha o
 > match no TMDB (filme ou episódio, dados em pt-BR e artes), e a pasta inteira vira um ISO de
 > DVD-Video com menus (filmes, ou uma temporada com "Tocar todos"), conferido automaticamente
 > antes de chegar à pasta de saída. O roadmap está no [`CLAUDE.md`](CLAUDE.md).
@@ -118,6 +119,21 @@ seis ganham páginas próprias); um disco de série tem "Tocar todos", as págin
 são páginas próprias, com um ✓ no idioma ligado. O filme volta à própria página e ao próprio
 botão; as teclas Menu e Title do controle sempre voltam ao menu principal.
 
+**Retomar, o cache e os rips de DVD:**
+
+- **Retomar:** um job que parou no meio (o WSL ou o PC reiniciou, faltou espaço, foi cancelado)
+  tem o botão **Retomar**. Ele roda o mesmo plano de novo, e os títulos já codificados vêm do
+  cache.
+- **Cache:** o vídeo MPEG-2 de cada título codificado fica em `HOST_WORK_DIR/cache` (hard link,
+  sem cópia), com a chave no próprio comando do encode. Montar de novo um disco com outro menu,
+  outra ordem ou outros capítulos pula o encode. Acima de `CACHE_LIMIT_GB` (padrão 50; 0
+  desliga), os mais antigos saem; a tela de Jobs mostra o tamanho e limpa.
+- **Rips de DVD:** o vídeo MPEG-2 de um rip de DVD (720x480 com o sequence header de DVD) é
+  copiado byte a byte em vez de recodificado, quando o áudio escolhido cabe no espaço que o disco
+  original tinha. Os capítulos são os do rip, levados ao GOP fechado mais próximo; o job confere
+  o fluxo logo depois de extrair, e a QA confere que o vídeo no disco é idêntico. "Recodificar os
+  rips" desliga a cópia num disco.
+
 Como funciona, em resumo:
 
 - **Vídeo:** MPEG-2 em 2 passes (nunca `-target ntsc-dvd`, que duplica quadros); filmes em
@@ -128,8 +144,8 @@ Como funciona, em resumo:
   16:9 tem uma segunda camada de botões para a TV 4:3 que mostra o menu com faixas pretas. Cada
   página é um segundo de MPEG-2 parado com AC-3 silencioso.
 - **Navegação:** `dvdauthor` com um titleset por título (cada um declara exatamente as próprias
-  faixas) e todo pulo passando pelo VMGM, onde duas PGCs só de comandos despacham o próximo
-  título e a página a mostrar. Os GPRMs guardam os idiomas, o próximo episódio e o botão
+  faixas) e todo pulo passando pelo VMGM, onde três PGCs só de comandos abrem a página
+  principal, despacham o próximo título e mostram a página em que a pessoa estava. Os GPRMs guardam os idiomas, o próximo episódio e o botão
   destacado. Um disco aceita até 60 títulos (o despachante cabe nos 128 comandos de uma PGC).
 - **ISO:** `genisoimage -dvd-video -udf`.
 - **Testes:** os testes lentos montam discos de verdade e navegam neles com a libdvdnav, a
@@ -140,9 +156,9 @@ progressivo, 59,94, taxa de quadros variável, 1080i, legendas em imagem (PGS, V
 ASS, menu de capítulos e menu com vídeo. Para um filme cuja legenda em português é imagem,
 coloque um `.srt` ao lado dele.
 
-A pasta de trabalho precisa de **cerca de 2 vezes o tamanho do disco** livre (uns 18 GB para um
-DVD-9): cada arquivo intermediário é apagado assim que a etapa seguinte dá certo, e **Apagar
-arquivos temporários**, na tela do job, remove o que sobrar.
+A pasta de trabalho precisa de **cerca de 3 vezes o tamanho do disco** livre com o cache ligado
+(uns 27 GB para um DVD-9; 2 vezes sem ele): cada arquivo intermediário é apagado assim que a
+etapa seguinte dá certo, e **Apagar arquivos temporários**, na tela do job, remove o que sobrar.
 
 ## Stack
 
