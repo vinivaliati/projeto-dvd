@@ -92,7 +92,8 @@ class LabelSheet:                # etiqueta redonda A4, 2 por folha (padrão Pim
 - Régua de 50 mm no pé, sob o verso (x = corte esquerdo + 10 mm, a 6 mm da borda de baixo da
   folha; traços a cada 10 mm, 2,5 mm nos extremos e 1,5 mm nos intermediários; "50 mm" em 6 pt,
   #5A5A5A). Aviso "Imprima em tamanho real (100%, sem ajustar à página)." em 7 pt, #5A5A5A,
-  centrado, a 5 mm do alto da folha.
+  alinhado à direita do corte menos 10 mm, na linha da régua (na execução: no alto, centrado,
+  ele cruzava as marcas de dobra da lombada).
 - Uma função converte mm em px para um DPI; o layout é em mm, e o render recebe o DPI.
 
 ## Conteúdo (`covers/content.py`, puro)

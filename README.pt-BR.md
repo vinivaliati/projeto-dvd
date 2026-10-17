@@ -11,11 +11,11 @@ O objetivo é uma coleção física feita para durar: discos que seguem as espec
 de DVD-Video e BDMV à risca, para tocar num player comum daqui a 20 anos, com menus simples o
 bastante para uma criança ou um avô usarem só com o controle remoto.
 
-> **Status:** Fase 4b (retomar, cache de encode, cópia de rip de DVD) sobre a 4a (montador e
-> menus de DVD). Cada vídeo de uma pasta de disco ganha o
-> match no TMDB (filme ou episódio, dados em pt-BR e artes), e a pasta inteira vira um ISO de
-> DVD-Video com menus (filmes, ou uma temporada com "Tocar todos"), conferido automaticamente
-> antes de chegar à pasta de saída. O roadmap está no [`CLAUDE.md`](CLAUDE.md).
+> **Status:** Fase 5 (capa e etiquetas do disco para imprimir) em cima do DVD com menus das
+> Fases 4a e 4b. Cada vídeo de uma pasta de disco recebe o match no TMDB (filme ou episódio,
+> dados e artes em pt-BR), a pasta inteira vira um ISO de DVD-Video com menus, conferido
+> automaticamente, e a tela **Capa** imprime o encarte da caixa e duas etiquetas redondas em
+> A4. O roadmap está no [`CLAUDE.md`](CLAUDE.md).
 
 ## Pipeline planejado
 
@@ -160,11 +160,35 @@ A pasta de trabalho precisa de **cerca de 3 vezes o tamanho do disco** livre com
 (uns 27 GB para um DVD-9; 2 vezes sem ele): cada arquivo intermediário é apagado assim que a
 etapa seguinte dá certo, e **Apagar arquivos temporários**, na tela do job, remove o que sobrar.
 
-## Stack
+## Imprimindo a capa
+
+O botão **Capa** de uma pasta abre a capa do disco que ela monta (ela lê o que o Montar DVD
+salvou: títulos, idiomas, fundo e cor de destaque).
+
+![O encarte da caixa: verso, lombada e frente numa folha A4](docs/images/cover-preview.png)
+
+- **Encarte** para a caixa comum de DVD (Amaray, 273 x 183 mm com lombada de 14 mm) numa folha
+  A4 deitada, com 3 mm de sangria, marcas de corte, marcas de dobra da lombada e uma régua de
+  50 mm. **Frente:** a arte escolhida, o nome e uma linha como "3 filmes" ou "Temporada 1 · 8
+  episódios". **Lombada:** o nome lido de baixo para cima, mais o ano ou "T1". **Verso:** a
+  sinopse e o elenco de um filme, a lista de filmes ou episódios com a duração real, e um
+  quadro técnico (duração, áudio, legendas, vídeo, disco).
+- **Etiquetas do disco:** uma segunda página A4 com duas etiquetas redondas (117 mm, furo de
+  41 mm, o padrão Pimaco comum), com o fundo do menu recortado num anel.
+- **Arte:** uma grade com todos os pôsteres e fundos que o TMDB mandou para os títulos
+  confirmados (o pôster da temporada ou da coleção primeiro), com um selo quando a imagem
+  ficaria abaixo de 300 DPI na impressão. A escolhida é baixada uma vez para
+  `OUTPUT_DIR/covers/<pasta>/`. Um pôster que já traz o título impresso fica sem o nome por
+  cima (automático, dá para mudar).
+- **Impressão:** "Gerar PDF" grava `OUTPUT_DIR/print/<pasta>.pdf` (300 DPI, sRGB). Imprima em
+  **tamanho real** (100%, sem "ajustar à página"), confira a régua de 50 mm com uma régua,
+  corte nas marcas e dobre nas marcas da lombada. As medidas ficam em `covers/sizes.py`:
+  confira com a caixa e a folha de etiquetas compradas antes de imprimir em lote.
+
 
 - Python 3.12, FastAPI, Jinja2, HTMX e um CSS próprio pequeno (sem etapa de build)
 - httpx2 para a API do TMDB (e o `MockTransport` dele nos testes: eles nunca chamam o TMDB)
-- Pillow para as páginas do menu e o preview delas
+- Pillow para as páginas do menu, as capas e o PDF
 - SQLite (WAL) com SQLModel e Alembic; um processo worker separado roda os jobs
 - Ferramentas de mídia: ffmpeg, dvdauthor/spumux, genisoimage, tsMuxeR, xorriso
 - Docker e docker compose; CI no GitHub Actions
