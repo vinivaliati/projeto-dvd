@@ -148,9 +148,13 @@ def render_labels(
 def write_pdf(cover: Image.Image, labels: Image.Image, target: Path) -> None:
     """Two pages at 300 DPI; JPEG at quality 95 without chroma subsampling keeps text sharp."""
     part = target.with_name(target.name + ".part")
-    cover.save(part, "PDF", save_all=True, append_images=[labels], resolution=PDF_DPI,
-               quality=95, subsampling=0)  # fmt: skip
-    part.replace(target)
+    try:
+        cover.save(part, "PDF", save_all=True, append_images=[labels], resolution=PDF_DPI,
+                   quality=95, subsampling=0)  # fmt: skip
+        part.replace(target)
+    except OSError:
+        part.unlink(missing_ok=True)
+        raise
 
 
 def load_art(path: Path | None) -> Image.Image | None:

@@ -253,12 +253,19 @@ def _duration(row: MediaFile) -> float | None:
     return summarize(json.loads(row.probe_json)).duration
 
 
-def confirmed_infos(session: Session, folder: str) -> dict[str, TitleInfo]:
-    """The confirmed TMDB match of each video of a folder, by path (menus and covers)."""
+def confirmed_details(session: Session, folder: str) -> dict[str, Details]:
+    """The stored TMDB details of each confirmed video of a folder, by path (cover art)."""
     return {
-        row.path: title_info(DETAILS.validate_json(row.title.tmdb_json))
+        row.path: DETAILS.validate_json(row.title.tmdb_json)
         for row in _folder_rows(session, folder)
         if row.title is not None
         and row.title.status == "confirmed"
         and row.title.tmdb_json is not None
+    }
+
+
+def confirmed_infos(session: Session, folder: str) -> dict[str, TitleInfo]:
+    """The confirmed TMDB match of each video of a folder, by path (menus and covers)."""
+    return {
+        path: title_info(details) for path, details in confirmed_details(session, folder).items()
     }

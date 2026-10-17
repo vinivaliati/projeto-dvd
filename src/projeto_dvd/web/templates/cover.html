@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Capa · {{ disc.name }}{% endblock %}
+{% block content %}
+<a class="back" href="{{ url_for('folder', name=disc.name | urlencode) }}">← {{ disc.name }}</a>
+<h1>Capa de <span class="folder-name">{{ disc.name }}</span></h1>
+<p class="muted">A capa da caixa (frente, lombada e verso) e duas etiquetas redondas para o disco, em folhas A4. Ela usa o que está salvo no Montar DVD: títulos, idiomas, fundo e cor.</p>
+{% if unmatched %}
+<p class="banner banner-warning">{{ unmatched }} vídeo{{ "s" if unmatched != 1 }} sem match confirmado: a capa usa o nome do arquivo. <a href="{{ url_for('folder', name=disc.name | urlencode) }}#tmdb">Confirmar no TMDB</a></p>
+{% endif %}
+<div class="cover-grid">
+  {% include "_cover_preview.html" %}
+  <div class="cover-controls">
+    <form id="cover-texts" hx-post="{{ url_for('cover_choices', name=disc.name | urlencode) }}" hx-trigger="change" hx-swap="none">
+      <fieldset>
+        <legend>Textos</legend>
+        <p class="muted">Vazio usa o texto automático.</p>
+        <label class="field">Faixa da frente
+          <input type="text" name="front_text" maxlength="80" value="{{ choices.cover.front_text or '' }}" placeholder="{{ automatic.front_text }}"></label>
+        <label class="field">Lombada
+          <input type="text" name="spine_text" maxlength="80" value="{{ choices.cover.spine_text or '' }}" placeholder="{{ automatic.spine_text }}"></label>
+        <h3>Nome na frente</h3>
+        <div class="choice-row">
+          {% for value, label in (("auto", "Automático"), ("yes", "Mostrar"), ("no", "Esconder")) %}
+          <label class="radio"><input type="radio" name="show_name" value="{{ value }}"{% if {"auto": none, "yes": true, "no": false}[value] == choices.cover.show_name %} checked{% endif %}> {{ label }}</label>
+          {% endfor %}
+        </div>
+        <p class="muted">No automático, um pôster que já traz o título impresso fica sem o nome por cima.</p>
+      </fieldset>
+    </form>
+    <fieldset>
+      <legend>Imprimir</legend>
+      <p class="muted">Imprima em tamanho real (100%, sem ajustar à página) e confira a régua de 50 mm.</p>
+      <form hx-post="{{ url_for('cover_pdf', name=disc.name | urlencode) }}" hx-target="#cover-pdf" hx-disabled-elt="find button">
+        <p class="actions"><button class="button primary" type="submit">Gerar PDF</button>
+          <span class="muted htmx-indicator">Gerando o PDF...</span></p>
+      </form>
+      <div id="cover-pdf" aria-live="polite"><p class="muted">O PDF vai para {{ pdf_path }} (substitui o anterior).</p></div>
+    </fieldset>
+  </div>
+</div>
+<div id="cover-message" aria-live="polite"></div>
+{% include "_cover_art.html" %}
+{% endblock %}
