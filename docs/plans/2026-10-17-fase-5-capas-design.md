@@ -3,7 +3,8 @@
 - **Data:** 2026-10-17
 - **Branch:** `feat/fase-5-capas`
 - **Status:** desenho aprovado pelo Vini no chat; revisada por `designer` (com protótipo em
-  Pillow), `curador` e `revisor-codigo`, achados incorporados; aguardando a revisão do Vini.
+  Pillow), `curador` e `revisor-codigo`, achados incorporados; aprovada pelo Vini (sem CMYK e sem logo na
+  frente).
 - **Ordem:** o plano começa depois do merge do PR #7 (Fase 4b): a branch é rebaseada na `main`
   (só tem os commits da spec), o que evita os conflitos em `DiscChoices`, `api/dvd.py`, testes
   de rota, CLAUDE.md e READMEs.
