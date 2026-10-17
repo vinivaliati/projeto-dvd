@@ -4,6 +4,7 @@ import json
 import os
 import re
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -12,12 +13,14 @@ import pytest
 from projeto_dvd.authoring.dvd.dvdauthor import disc_xml, dvdauthor_command
 from projeto_dvd.authoring.dvd.qa import QaReport
 from projeto_dvd.authoring.dvd.subtitles import FONT
+from projeto_dvd.encode.mpeg2 import inspect_stream
 from projeto_dvd.jobs import pipeline as pipeline_module
-from projeto_dvd.jobs.pipeline import PipelineResult, QaFailed, Step, run_pipeline
+from projeto_dvd.jobs.pipeline import CacheUse, PipelineResult, QaFailed, Step, run_pipeline
 from projeto_dvd.jobs.runner import Canceled, ProcessRunner
+from projeto_dvd.library.probe import run_ffprobe, summarize
 from projeto_dvd.menus.layout import letterbox_y
 from projeto_dvd.menus.pages import build_pages
-from projeto_dvd.planner.calculator import MENU_PAGE_BYTES
+from projeto_dvd.planner.calculator import MENU_PAGE_BYTES, menu_bytes
 from projeto_dvd.planner.disc_plan import DiscPlan
 from projeto_dvd.planner.profiles import PROFILES, DiscProfile
 from projeto_dvd.planner.source import VideoMode
@@ -112,7 +115,7 @@ def test_dvd_rip_film_is_not_duplicated(tmp_path: Path) -> None:
     source = clips.source_of(media, "Rip")
     assert source.mode == VideoMode.FILM
 
-    result = generate(media, "Rip", tmp_path)
+    result = generate(media, "Rip", tmp_path, reencode_rips=True)
 
     passed(result.qa_json)  # includes dup_frames == 0 and the 3:2 field cadence
 
@@ -136,7 +139,8 @@ def test_estimate_is_close_to_the_real_size(
 ) -> None:
     media = tmp_path / "media"
     clips.movie_1080p(media / "Filme" / "Filme.mkv", noisy=True)
-    tiny = DiscProfile(key="dvd5", name="Teste", description="teste", sectors=4800)
+    # Room for the fixed menu reserve (40 MiB) plus about 8 MB of video.
+    tiny = DiscProfile(key="dvd5", name="Teste", description="teste", sectors=26_600)
     monkeypatch.setitem(PROFILES, "dvd5", tiny)
 
     result = generate(media, "Filme", tmp_path, profile="dvd5", subtitles=(), subtitle_on=None)
@@ -149,8 +153,7 @@ def test_estimate_is_close_to_the_real_size(
                           listing))  # fmt: skip
     plan = clips.plan_for(media, "Filme", profile="dvd5", subtitles=(), subtitle_on=None)
     assert plan.menu is not None
-    expected = plan.estimated_bytes - tiny.reserve_bytes - len(plan.menu.pages) * MENU_PAGE_BYTES
-    assert vobs > 0
+    expected = plan.estimated_bytes - tiny.reserve_bytes - menu_bytes(len(plan.menu.pages))
     assert abs(vobs - expected) / expected < 0.03, (vobs, expected)
 
 
@@ -330,3 +333,98 @@ def test_sixty_titles_fit_in_the_dispatcher(tmp_path: Path) -> None:
 
     assert "ERR:" not in authored.stderr
     assert (job / "dvd" / "VIDEO_TS" / "VTS_60_1.VOB").exists()
+
+
+# Cache, resume and copied DVD video
+
+
+def run_with_cache(
+    plan: DiscPlan, media: Path, job: Path, work: Path, out: Path,
+    should_cancel: Callable[[], bool] = lambda: False,
+    report: Callable[[Step, float, int], None] = lambda step, fraction, title: None,
+) -> PipelineResult:  # fmt: skip
+    job.mkdir(parents=True, exist_ok=True)
+    runner = ProcessRunner(log_path=job / "job.log", should_cancel=should_cancel, cwd=job)
+    use = CacheUse(work_dir=work, limit_bytes=10**12, ffmpeg="slow-test")
+    return run_pipeline(plan, media_dir=media, job_dir=job, output_dir=out, tools=runner,
+                        report=report, should_cancel=should_cancel, cache=use)  # fmt: skip
+
+
+def test_a_second_build_reuses_the_encoded_video(tmp_path: Path) -> None:
+    media = tmp_path / "media"
+    clips.movie_1080p(media / "Filme" / "Filme.mkv", seconds=6)
+    plan = clips.plan_for(media, "Filme", subtitles=(), subtitle_on=None)
+    first = run_with_cache(plan, media, tmp_path / "j1", tmp_path / "work", tmp_path / "out")
+    first.iso_path.unlink()
+
+    second = run_with_cache(plan, media, tmp_path / "j2", tmp_path / "work", tmp_path / "out")
+
+    log = (tmp_path / "j2" / "job.log").read_text()
+    assert "-pass" not in log and "vídeo reaproveitado do cache" in log
+    passed(second.qa_json)
+
+
+def test_a_job_stopped_in_the_second_title_resumes_from_the_cache(tmp_path: Path) -> None:
+    media = tmp_path / "media"
+    folder = clips.series_folder(media)
+    plan = clips.plan_for(media, folder, subtitles=())
+    state: dict[str, bool] = {}
+
+    def report(step: Step, fraction: float, title: int) -> None:
+        if (step, title) == (Step.VIDEO_PASS1, 2):
+            state["stop"] = True
+
+    with pytest.raises(Canceled):
+        run_with_cache(plan, media, tmp_path / "job", tmp_path / "work", tmp_path / "out",
+                       should_cancel=lambda: "stop" in state, report=report)  # fmt: skip
+    state.clear()
+
+    result = run_with_cache(plan, media, tmp_path / "job", tmp_path / "work", tmp_path / "out")
+
+    log = (tmp_path / "job" / "job.log").read_text()
+    assert "Título 1: vídeo reaproveitado do cache" in log
+    passed(result.qa_json)
+
+
+@pytest.mark.parametrize("size_tag", [True, False])
+def test_a_dvd_rip_is_copied_byte_for_byte(tmp_path: Path, size_tag: bool) -> None:
+    media = tmp_path / "media"
+    source = clips.dvd_rip_copyable(media / "Rip" / "Rip.mkv", size_tag)
+    plan = clips.plan_for(media, "Rip", subtitles=(), subtitle_on=None)
+    assert plan.titles[0].copy_video, plan.titles[0]
+
+    result = run_with_cache(plan, media, tmp_path / "job", tmp_path / "work", tmp_path / "out")
+
+    report = passed(result.qa_json)
+    assert {"t1-same_video", "t1-gop"} <= {c.name for c in report.checks}
+    xml = (tmp_path / "job" / "dvd.xml").read_text()
+    found = re.search(r'title1\.mpg" chapters="([^"]+)"', xml)
+    assert found is not None
+    chapters = [_seconds(text) for text in found.group(1).split(",")]
+    closed = [start for start, is_closed in inspect_stream(source).gops if is_closed]
+    assert len(chapters) == 3 and chapters[0] == 0
+    assert all(any(abs(c - start) < 0.002 for start in closed) for c in chapters)
+    assert chapters[1:] != [2.1, 5.0]  # moved from the middle of open GOPs
+    disc = framemd5(["-f", "dvdvideo", "-title", "1", "-i", str(result.iso_path)])
+    assert disc == framemd5(["-i", str(source)])
+
+
+def _seconds(text: str) -> float:
+    hours, minutes, seconds = text.split(":")
+    return int(hours) * 3600 + int(minutes) * 60 + float(seconds)
+
+
+def framemd5(args: list[str]) -> list[str]:
+    output = subprocess.run(
+        ["ffmpeg", "-nostdin", "-v", "error", *args, "-map", "0:v", "-c", "copy", "-f",
+         "framemd5", "-"], capture_output=True, text=True, check=True,
+    ).stdout  # fmt: skip
+    return [line.rsplit(",", 1)[1] for line in output.splitlines() if not line.startswith("#")]
+
+
+def test_the_dvd_header_is_read_from_a_reference_stream(tmp_path: Path) -> None:
+    source = clips.dvd_rip_copyable(tmp_path / "Rip" / "Rip.mkv", size_tag=True, seconds=2)
+    probe = run_ffprobe(source)
+    assert probe.json is not None
+    video = summarize(json.loads(probe.json)).video
+    assert video is not None and video.dvd_header == (9_800_000, 1_835_008)

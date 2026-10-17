@@ -157,3 +157,50 @@ def interlaced_480i(path: Path, seconds: int = 8) -> Path:
            "-b:v", "6000k", "-aspect", "4:3", "-c:a", "ac3", "-b:a", "192k",
            "-metadata:s:a:0", "language=por", str(path))  # fmt: skip
     return path
+
+
+def reopen_gops(m2v: Path, closed: set[int]) -> None:
+    """Clear the closed_gop flag of every GOP not in `closed` (by order), as commercial DVDs
+    with open GOPs have; the pictures stay decodable (the encoder closed them)."""
+    data = bytearray(m2v.read_bytes())
+    count, position = 0, data.find(b"\x00\x00\x01\xb8")
+    while position >= 0:
+        if count not in closed:
+            data[position + 7] &= ~0x40 & 0xFF
+        count += 1
+        position = data.find(b"\x00\x00\x01\xb8", position + 4)
+    m2v.write_bytes(bytes(data))
+
+
+def dvd_rip_copyable(path: Path, size_tag: bool, seconds: int = 10) -> Path:
+    """A rip like a commercial film DVD: MPEG-2 with the DVD header (9.8 Mbps, VBV 224 KiB),
+    GOPs of 12 pictures with soft pulldown (30 fields), most of them open, chapters in the
+    middle of GOPs, Portuguese AC-3 at 192k; MKV with or without MakeMKV's size tag."""
+    work = path.parent
+    work.mkdir(parents=True, exist_ok=True)
+    m2v, vob, chapters = work / "rip.m2v", work / "rip.vob", work / "chapters.txt"
+    ffmpeg(
+        "-f", "lavfi", "-i", f"testsrc2=s=720x480:r=24000/1001:d={seconds}",
+        "-c:v", "mpeg2video", "-b:v", "6000k", "-maxrate", "9800k", "-bufsize", "1835k",
+        "-g", "12", "-bf", "2", "-flags", "+cgop", "-sc_threshold", "1000000000",
+        "-aspect", "16:9", "-f", "mpeg2video", str(m2v),
+    )  # fmt: skip
+    apply_soft_pulldown(m2v)
+    reopen_gops(m2v, closed={0, 4, 8, 12})  # closed at 0, 2, 4 and 6 s
+    chapters.write_text(
+        ";FFMETADATA1\n"
+        + "".join(
+            f"[CHAPTER]\nTIMEBASE=1/1000\nSTART={s}\nEND={s + 1000}\ntitle=C\n"
+            for s in (0, 2100, 5000)  # 2.1 s: near the closed GOP at 2 s; 5 s: none near
+        )
+    )
+    ffmpeg("-fflags", "+genpts", "-i", str(m2v), "-f", "lavfi", "-i",
+           f"sine=d={seconds}:sample_rate=48000", "-map", "0", "-map", "1", "-c:v", "copy",
+           "-c:a", "ac3", "-b:a", "192k", "-metadata:s:a:0", "language=por",
+           "-f", "dvd", str(vob))  # fmt: skip
+    tag = ["-metadata:s:v:0", f"NUMBER_OF_BYTES-eng={m2v.stat().st_size}"] if size_tag else []
+    ffmpeg("-fflags", "+genpts", "-i", str(vob), "-i", str(chapters), "-map", "0:v",
+           "-map", "0:a", "-map_chapters", "1", "-c", "copy", *tag, str(path))  # fmt: skip
+    for leftover in (vob, chapters):
+        leftover.unlink()
+    return m2v  # kept next to the rip, to compare with the disc
