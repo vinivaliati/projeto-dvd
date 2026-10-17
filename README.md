@@ -183,6 +183,7 @@ Montar DVD page saved: titles, languages, backdrop and accent color).
   marks and fold on the spine marks. The measures live in `covers/sizes.py`: check them against
   the case and the label sheet you bought before printing a batch.
 
+## Stack
 
 - Python 3.12, FastAPI, Jinja2, HTMX and a small hand-written CSS (no build step)
 - httpx2 for the TMDB API (and its `MockTransport` in the tests: they never call TMDB)

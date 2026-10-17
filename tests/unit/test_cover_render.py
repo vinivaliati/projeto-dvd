@@ -173,3 +173,15 @@ def test_text_is_measured_the_same_at_any_dpi() -> None:
     text = "O Senhor dos Anéis: A Sociedade do Anel"
 
     assert pen(50).measure(True)(text, 12) == pen(300).measure(True)(text, 12)
+
+
+def test_a_long_front_line_shrinks_and_stays_inside_the_margins() -> None:
+    content = replace(MOVIE, front_text="MW " * 26)  # 78 wide characters
+    page = render_cover(content, gray(), None, ACCENT, True, DPI)
+    front, cut = cover_layout().front, cover_layout().cut
+    foot = (px(cut.y + cut.h - 20, DPI), px(cut.y + cut.h - 8, DPI))
+    margins = [(front.x, front.x + 8), (front.x + front.w - 3 - 8, front.x + front.w)]
+
+    for left, right in margins:
+        zone = page.crop((px(left, DPI), foot[0], px(right, DPI), foot[1])).convert("L")
+        assert max(zone.tobytes()) < 200  # no letters in the side margins

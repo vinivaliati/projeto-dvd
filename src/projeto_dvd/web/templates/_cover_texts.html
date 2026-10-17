@@ -1,0 +1,17 @@
+<form id="cover-texts"{% if oob %} hx-swap-oob="true"{% endif %} hx-post="{{ url_for('cover_choices', name=disc.name | urlencode) }}" hx-trigger="change" hx-swap="none">
+  <fieldset>
+    <legend>Textos</legend>
+    <p class="muted">Vazio usa o texto automático.</p>
+    <label class="field">Faixa da frente
+      <input type="text" name="front_text" maxlength="80" value="{{ choices.cover.front_text or '' }}" placeholder="{{ automatic.front_text }}"></label>
+    <label class="field">Lombada
+      <input type="text" name="spine_text" maxlength="80" value="{{ choices.cover.spine_text or '' }}" placeholder="{{ automatic.spine_text }}"></label>
+    <h3>Nome na frente</h3>
+    <div class="choice-row">
+      {% for value, label in (("auto", "Automático"), ("yes", "Mostrar"), ("no", "Esconder")) %}
+      <label class="radio"><input type="radio" name="show_name" value="{{ value }}"{% if {"auto": none, "yes": true, "no": false}[value] == choices.cover.show_name %} checked{% endif %}> {{ label }}</label>
+      {% endfor %}
+    </div>
+    <p class="muted">No automático, um pôster que já traz o título impresso fica sem o nome por cima.</p>
+  </fieldset>
+</form>

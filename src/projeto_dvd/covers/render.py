@@ -31,6 +31,7 @@ WHITE, SECONDARY, SOFT, FAINT = "#FFFFFF", "#C8C8C8", "#E1E1E1", "#B4B4B4"
 RULE, INK, BLACK = "#6E6E6E", "#5A5A5A", "#000000"
 NAME_SIZES = tuple(float(size) for size in range(28, 19, -1))
 LABEL_SIZES = tuple(float(size) for size in range(16, 10, -1))
+FOOT_SIZES = (11.0, 10.0, 9.0, 8.0)
 TOP_SHADE, BOTTOM_SHADE, SHADE_FADE = 0.80, 0.85, 30.0
 BACK_BRIGHTNESS = 0.22
 BLUR_MM = 4.0
@@ -54,11 +55,12 @@ class _Pen:
         return px(mm, self.dpi)
 
     def font(self, pt: float, bold: bool) -> Font:
-        return self.fonts(max(1, round(pt * self.dpi / 72)), bold)
+        """Rounded down: a preview font never draws wider than the text was measured."""
+        return self.fonts(max(1, int(pt * self.dpi / 72)), bold)
 
     def width(self, text: str, pt: float, bold: bool = False) -> float:
         """Always measured at 300 DPI: the 50 DPI preview breaks and cuts text like the PDF."""
-        font = self.fonts(max(1, round(pt * MEASURE_DPI / 72)), bold)
+        font = self.fonts(max(1, int(pt * MEASURE_DPI / 72)), bold)
         return font.getlength(text) * MM_PER_INCH / MEASURE_DPI
 
     def measure(self, bold: bool = False) -> Measure:
@@ -192,7 +194,9 @@ def _front(
     _shade(image, solid, pen.px(SHADE_FADE), BOTTOM_SHADE, from_top=False)
     if content.front_text:
         baseline = bottom - 12
-        pen.text(center, baseline, content.front_text, 11, bold=True, anchor="ms")
+        width = CASE.panel_width - 2 * CASE.text_margin
+        line, pt = fit_spine(content.front_text, width, pen.measure(True), FOOT_SIZES)
+        pen.text(center, baseline, line, pt, bold=True, anchor="ms")
         pen.rect(center - 6, baseline - CAP * 11 * POINT - 4 - 0.7, 12, 0.7, accent)
     return image
 

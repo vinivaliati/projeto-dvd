@@ -185,6 +185,7 @@ salvou: títulos, idiomas, fundo e cor de destaque).
   corte nas marcas e dobre nas marcas da lombada. As medidas ficam em `covers/sizes.py`:
   confira com a caixa e a folha de etiquetas compradas antes de imprimir em lote.
 
+## Stack
 
 - Python 3.12, FastAPI, Jinja2, HTMX e um CSS próprio pequeno (sem etapa de build)
 - httpx2 para a API do TMDB (e o `MockTransport` dele nos testes: eles nunca chamam o TMDB)

@@ -348,3 +348,14 @@ def test_a_chosen_backdrop_gets_the_name_and_a_chosen_poster_does_not(
         project.choices_json = choices.model_dump_json()
         session.commit()
     assert built(ready, settings).show_name
+
+
+def test_choosing_an_art_shows_the_automatic_name_choice_again(ready: TestClient) -> None:
+    ready.post("/folders/Filme/cover/choices", headers=SAME, data={"show_name": "no"})
+
+    response = ready.post("/folders/Filme/cover/art", headers=SAME,
+                          data={"file_path": "/posterpt.jpg"})  # fmt: skip
+
+    assert 'id="cover-texts"' in response.text
+    assert 'name="show_name" value="auto" checked' in response.text
+    assert saved(ready).cover.show_name is None

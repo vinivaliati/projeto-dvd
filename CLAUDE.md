@@ -629,7 +629,7 @@ _Atualizar ao fim de cada sessão._
   `docs/plans/2026-10-17-fase-5-capas*.md`, spec revisada por `designer`, `curador` e
   `revisor-codigo`). Tela "Capa" da pasta: encarte da caixa Amaray (verso, lombada e frente) e
   duas etiquetas redondas em A4, grade com as artes do TMDB, textos editáveis e PDF em
-  `OUTPUT_DIR/print/`. `make lint`, `make test` (100%) e `make test-slow` verdes. Falta imprimir
+  `OUTPUT_DIR/print/`. `make lint`, `make test` (100%) e `make test-slow` (28) verdes. Falta imprimir
   uma de teste com o material comprado.
 - Os agentes de `.claude/agents/` só são reconhecidos pelo nome a partir de uma sessão nova; na
   sessão em que foram criados, rodam como agente genérico lendo o próprio arquivo.
