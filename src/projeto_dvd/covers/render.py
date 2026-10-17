@@ -24,6 +24,7 @@ from projeto_dvd.menus import render as menu
 from projeto_dvd.menus.render import NEUTRAL_NEAR, Font, Fonts, cover_crop, neutral
 
 PDF_DPI = 300
+MEASURE_DPI = 300  # text is measured here at any render DPI
 POINT = MM_PER_INCH / 72  # one point in mm
 CAP = 0.72  # cap height of DejaVu Sans, in em
 WHITE, SECONDARY, SOFT, FAINT = "#FFFFFF", "#C8C8C8", "#E1E1E1", "#B4B4B4"
@@ -56,7 +57,9 @@ class _Pen:
         return self.fonts(max(1, round(pt * self.dpi / 72)), bold)
 
     def width(self, text: str, pt: float, bold: bool = False) -> float:
-        return self.font(pt, bold).getlength(text) * MM_PER_INCH / self.dpi
+        """Always measured at 300 DPI: the 50 DPI preview breaks and cuts text like the PDF."""
+        font = self.fonts(max(1, round(pt * MEASURE_DPI / 72)), bold)
+        return font.getlength(text) * MM_PER_INCH / MEASURE_DPI
 
     def measure(self, bold: bool = False) -> Measure:
         return lambda text, pt: self.width(text, pt, bold)

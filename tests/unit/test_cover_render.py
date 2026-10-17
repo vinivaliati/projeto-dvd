@@ -3,11 +3,11 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
-from PIL import Image, PdfParser
+from PIL import Image, ImageFont, PdfParser
 
 from projeto_dvd.covers.content import CoverContent, CoverLine
 from projeto_dvd.covers.layout import cover_layout
-from projeto_dvd.covers.render import load_art, render_cover, render_labels, write_pdf
+from projeto_dvd.covers.render import _Pen, load_art, render_cover, render_labels, write_pdf
 from projeto_dvd.covers.sizes import LABELS, px
 
 DPI = 50
@@ -164,3 +164,12 @@ def test_above_the_bleed_there_are_only_the_marks() -> None:
     for x in range(px(layout.cut.x, DPI) + 2, px(layout.cut.x + layout.cut.w, DPI) - 2):
         if x not in folds:
             assert page.crop((x, 0, x + 1, top)).getextrema() == ((255, 255),) * 3, x
+
+
+def test_text_is_measured_the_same_at_any_dpi() -> None:
+    def pen(dpi: int) -> _Pen:
+        return _Pen(Image.new("RGB", (1, 1)), dpi, lambda size, bold: ImageFont.load_default(size))
+
+    text = "O Senhor dos Anéis: A Sociedade do Anel"
+
+    assert pen(50).measure(True)(text, 12) == pen(300).measure(True)(text, 12)
