@@ -174,3 +174,31 @@ def test_a_folder_with_a_cache_name_is_not_an_entry(tmp_path: Path) -> None:
 
     assert cache.cache_bytes(tmp_path) == 0
     assert cache.evict(tmp_path, 0, keep=()) == 0
+
+
+def test_a_blu_ray_key_follows_the_x264_command() -> None:
+    dvd = key()
+    blu_ray = key(profile="bd25")
+
+    assert blu_ray != dvd
+    assert key(profile="bd50") == blu_ray  # same encode on either disc size
+    assert key(profile="bd25", video_kbps=20_000) != blu_ray
+
+
+def test_h264_entries_are_kept_counted_and_evicted(tmp_path: Path) -> None:
+    h264 = write_m2v(tmp_path / "job" / "video.h264", b"\x00\x00\x00\x01h264" * 10)
+    m2v = write_m2v(tmp_path / "job" / "title1.m2v")
+    cache.store(tmp_path, "b" * 64, h264, PASS2)
+    cache.store(tmp_path, "c" * 64, m2v, PASS2)
+    target = tmp_path / "job2" / "video.h264"
+
+    assert cache.lookup(tmp_path, "b" * 64, target) is not None
+    assert target.read_bytes() == h264.read_bytes()
+    assert cache.cache_bytes(tmp_path) == h264.stat().st_size + m2v.stat().st_size
+    assert cache.lookup(tmp_path, "c" * 64, tmp_path / "job2" / "video.h264") is None
+
+    os.utime(cache.cache_dir(tmp_path) / f"{'b' * 64}.h264", (1, 1))
+    cache.evict(tmp_path, m2v.stat().st_size, keep=())
+    assert not (cache.cache_dir(tmp_path) / f"{'b' * 64}.h264").exists()
+    cache.purge(tmp_path, ["c" * 64])
+    assert list(cache.cache_dir(tmp_path).iterdir()) == []
