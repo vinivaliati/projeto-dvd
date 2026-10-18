@@ -323,7 +323,7 @@ def test_reconcile_drops_removed_videos_and_appends_new_ones() -> None:
 def test_reconcile_drops_what_no_longer_exists() -> None:
     titles = [title("P/a.mkv", [audio(1, "por")], [sub(2, "por")])]
     suggestion = suggest_choices(titles, "P", dvd9)
-    saved = choices(profile="bd25", audio=("en", "pt"), subtitles=("en", "pt"), subtitle_on="en",
+    saved = choices(profile="hddvd", audio=("en", "pt"), subtitles=("en", "pt"), subtitle_on="en",
                     theme=Theme(backdrop="Gone (2001)", accent="azul"))  # fmt: skip
     result = reconcile(saved.model_dump_json(), titles, suggestion, ("A (2001)",))
     assert (result.profile, result.audio, result.subtitles) == ("dvd9", ("pt",), ("pt",))

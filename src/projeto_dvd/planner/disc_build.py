@@ -195,7 +195,11 @@ def disc_estimates(
         if path in by_path
     ]
     pages = len(menu_plan(choices, titles, folder, None, None).pages)
-    return [disc_estimate(profile, plans, pages) for profile in PROFILES.values()]
+    return [
+        disc_estimate(profile, plans, pages)
+        for profile in PROFILES.values()
+        if profile.medium == "dvd"
+    ]
 
 
 def profile_for(titles: Sequence[DiscTitle], folder: str) -> Callable[[DiscChoices], str]:
