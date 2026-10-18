@@ -11,7 +11,9 @@ from projeto_dvd.authoring.dvd.subtitles import decode_srt
 from projeto_dvd.planner.dvd_plan import BD_PCM_BITS, AudioChoice
 
 SUFFIXES = {"ac3": ".ac3", "dts": ".dts"}
-FORMATS = {".ac3": "ac3", ".dts": "dts", ".wav": "wav"}
+# LPCM goes in Matroska: a WAV header cannot say more than 4 GiB, which a 5.1 24-bit track
+# passes after 83 minutes (tested: ffmpeg writes a broken WAV; tsMuxeR reads LPCM from MKA).
+FORMATS = {".ac3": "ac3", ".dts": "dts", ".mka": "matroska"}
 
 
 def h264_copy_command(source: Path, video_index: int, out: Path) -> list[str]:
@@ -27,7 +29,7 @@ def audio_suffix(choice: AudioChoice) -> str:
     if choice.action == "ac3":
         return ".ac3"
     if choice.codec in BD_PCM_BITS:
-        return ".wav"
+        return ".mka"
     return SUFFIXES[choice.codec]
 
 

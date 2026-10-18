@@ -723,3 +723,15 @@ def test_the_blu_ray_page_marks_the_suggestion_and_says_the_movie_starts(
     assert "sugerido" in card
     assert "o filme começa" in page and "o menu abre" not in page
     assert "Recodificar o vídeo" not in page  # this file cannot be copied anyway
+
+
+def test_a_stale_blu_ray_form_for_a_folder_that_cannot_be_one_is_refused(
+    client: TestClient,
+) -> None:
+    scan(client, "Dois")
+    form = disc_form(order=["Dois/a.mkv", "Dois/b.mkv"], profile="bd25")
+
+    response = client.post("/folders/Dois/dvd/choices", headers=SAME, data=form)
+
+    assert response.status_code == 200 and "Formulário inválido" in response.text
+    assert saved(client, "Dois") is None

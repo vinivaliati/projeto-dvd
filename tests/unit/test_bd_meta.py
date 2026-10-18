@@ -30,7 +30,8 @@ def subtitle(key: str, language: str, codec: str) -> SubtitleChoice:
 def test_a_remux_with_lossless_audio_and_pgs() -> None:
     title = make_title_plan(width=1920, height=1080, chapters=(0.0, 300.0, 600.5),
                             audio=(track(1, "pt", "ac3"), track(2, "en", "dts")),
-                            subtitles=(subtitle("s3", "pt", "pgs"),))  # fmt: skip
+                            subtitles=(subtitle("s3", "pt", "pgs"),),
+                            subtitle_map=(0,))  # fmt: skip
     plan = make_disc_plan(profile="bd25", volume="O Senhor dos Aneis", titles=(title,),
                           menu=None, subtitle_on=1)  # fmt: skip
     inputs = BdInputs(J / "video.h264", (J / "a1.ac3", J / "a2.dts"), (J / "s1.sup",))
@@ -48,12 +49,13 @@ def test_a_remux_with_lossless_audio_and_pgs() -> None:
 def test_720p_with_lpcm_and_a_text_subtitle_off() -> None:
     title = make_title_plan(width=1280, height=720, chapters=(0.0,),
                             audio=(track(1, "en", "pcm_s24le"),),
-                            subtitles=(subtitle("s2", "pt", "text"),))  # fmt: skip
+                            subtitles=(subtitle("s2", "pt", "text"),),
+                            subtitle_map=(0,))  # fmt: skip
     plan = make_disc_plan(profile="bd25", volume="F", titles=(title,), menu=None, subtitle_on=0)
-    inputs = BdInputs(J / "video.h264", (J / "a1.wav",), (J / "s1.srt",))
+    inputs = BdInputs(J / "video.h264", (J / "a1.mka",), (J / "s1.srt",))
 
     assert bd_meta(plan, inputs).splitlines()[2:] == [
-        'A_LPCM, "/work/jobs/7/a1.wav", lang=eng, default',
+        'A_LPCM, "/work/jobs/7/a1.mka", track=1, lang=eng, default',
         'S_TEXT/UTF8, "/work/jobs/7/s1.srt", font-name="DejaVu Sans", font-size=39, '
         "font-border=3, bottom-offset=72, video-width=1280, video-height=720, fps=23.976, "
         "lang=por",
@@ -114,3 +116,16 @@ def test_a_clean_tsmuxer_run() -> None:
     )
 
     assert tsmuxer_problem(clean) is None
+
+
+def test_the_subtitle_turned_on_follows_the_disc_language_not_the_track_position() -> None:
+    # Disc languages fr (forced only in this title), pt, es; pt turned on.
+    title = make_title_plan(chapters=(0.0,), audio=(track(1, "pt", "ac3"),),
+                            subtitles=(subtitle("s3", "pt", "pgs"), subtitle("s4", "es", "pgs")),
+                            subtitle_map=(None, 0, 1))  # fmt: skip
+    plan = make_disc_plan(profile="bd25", titles=(title,), menu=None, subtitle_on=2)
+
+    meta = bd_meta(plan, BdInputs(J / "v.h264", (J / "a1.ac3",), (J / "s1.sup", J / "s2.sup")))
+
+    assert 'S_HDMV/PGS, "/work/jobs/7/s1.sup", lang=por, default=all' in meta
+    assert 'S_HDMV/PGS, "/work/jobs/7/s2.sup", lang=spa\n' in meta

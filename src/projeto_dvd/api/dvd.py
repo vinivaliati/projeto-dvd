@@ -124,6 +124,8 @@ def parse_disc_form(form: Mapping[str, list[str]], disc: Disc) -> DiscChoices | 
         audio.remove(first)
         audio.insert(0, first)
     medium = PROFILES[one("profile")].medium if one("profile") in PROFILES else "dvd"
+    if medium == "bluray" and bd_eligible(disc.titles) is not None:
+        return None  # a page from before the folder changed
     subtitles = [lang for lang in subtitle_languages(disc.titles, medium)
                  if lang in form.get("subtitle", []) or lang == on]  # fmt: skip
     backdrop = one("backdrop") or None

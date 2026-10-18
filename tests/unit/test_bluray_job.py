@@ -20,7 +20,7 @@ from projeto_dvd.jobs.pipeline import (
     overall_progress,
     steps_for,
 )
-from projeto_dvd.jobs.runner import Canceled, RunResult
+from projeto_dvd.jobs.runner import Canceled, RunResult, ToolError
 from projeto_dvd.planner.disc_plan import DiscPlan
 from projeto_dvd.planner.dvd_plan import AudioChoice, SubtitleChoice
 from tests.plans import make_disc_plan, make_title_plan
@@ -40,15 +40,18 @@ def plan(copy: bool = False, subtitles: bool = True) -> DiscPlan:
     title = make_title_plan(path="F/a.mkv", size=4, mtime_ns=0, duration=600.0,
                             chapters=(0.0, 300.0), audio=audio, width=1920, height=1080,
                             subtitles=subs if subtitles else (), copy_video=copy,
+                            subtitle_map=(0, 1) if subtitles else (),
                             video_bytes=len(VIDEO) if copy else None)  # fmt: skip
     return make_disc_plan(profile="bd25", folder="F", volume="F", iso_name="F (BD).iso",
-                          titles=(title,), menu=None, subtitle_on=1, video_kbps=20_000,
+                          titles=(title,), menu=None, subtitle_on=1 if subtitles else 0,
+                          video_kbps=20_000,
                           maxrate_kbps=35_000, estimated_bytes=10**6)  # fmt: skip
 
 
 class FakeTools:
     def __init__(self, tsmuxer_says: str = "100.0% complete\nMux successful complete\n",
-                 decode_stderr: str = "") -> None:  # fmt: skip
+                 decode_stderr: str = "", tsmuxer_fails: bool = False) -> None:  # fmt: skip
+        self.tsmuxer_fails = tsmuxer_fails
         self.commands: list[list[str]] = []
         self.tsmuxer_says = tsmuxer_says
         self.decode_stderr = decode_stderr
@@ -64,6 +67,8 @@ class FakeTools:
         if command[0] == "tsMuxeR":
             assert stdout is not None
             make_file(stdout, self.tsmuxer_says.encode())
+            if self.tsmuxer_fails:
+                raise ToolError("tsMuxeR", 254, "")
             make_file(Path(command[2]), b"iso" * 100)
         elif command[-1] == "-":
             return RunResult({"progress": "end"}, self.decode_stderr)
@@ -243,7 +248,8 @@ def test_blu_ray_steps_and_progress() -> None:
 def test_a_text_subtitle_of_the_mkv_is_extracted(tmp_path: Path, disc: dict[str, object]) -> None:
     p = plan()
     text = SubtitleChoice(key="s4", stream_index=4, file=None, language="en", codec="text")
-    p = p.model_copy(update={"titles": (p.titles[0].model_copy(update={"subtitles": (text,)}),)})
+    only = {"subtitles": (text,), "subtitle_map": (0,)}
+    p = p.model_copy(update={"titles": (p.titles[0].model_copy(update=only),)})
     tools = FakeTools()
     disc["info"] = BdInfo(**{**GOOD_INFO.__dict__, "pg": (BdStream(0x90, 0, 0, "eng"),)})
 
@@ -279,3 +285,23 @@ def test_cancel_while_copying_the_iso(tmp_path: Path, disc: object) -> None:
     with pytest.raises(Canceled):
         run(tmp_path, plan().model_copy(update={"replace_existing": True}), FakeTools(),
             cancel=cancel_last)  # fmt: skip
+
+
+def test_a_tsmuxer_error_shows_its_line_and_keeps_its_output(tmp_path: Path, disc: object) -> None:
+    tools = FakeTools(tsmuxer_says="Decoding H264 stream\nUnsupported stream: oops\n",
+                      tsmuxer_fails=True)  # fmt: skip
+
+    with pytest.raises(PipelineError) as error:
+        run(tmp_path, plan(), tools)
+
+    assert "Unsupported stream: oops" in error.value.message and error.value.step == Step.ISO
+    assert "Unsupported stream: oops" in (tmp_path / "job" / "job.log").read_text()
+
+
+def test_a_tsmuxer_warning_forgets_the_cached_video(tmp_path: Path, disc: object) -> None:
+    use = CacheUse(work_dir=tmp_path / "work", limit_bytes=10**9, ffmpeg="7.1")
+
+    with pytest.raises(PipelineError):
+        run(tmp_path, plan(), FakeTools(tsmuxer_says="H264 bad frame detected\n"), cache=use)
+
+    assert jobs_cache.cache_bytes(use.work_dir) == 0  # Retomar encodes again

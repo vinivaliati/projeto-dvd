@@ -29,9 +29,8 @@ from projeto_dvd.encode.bd_extract import (
 from projeto_dvd.encode.bd_extract import srt_command as text_srt_command
 from projeto_dvd.encode.x264 import x264_pass_command
 from projeto_dvd.jobs import cache as jobs_cache
-from projeto_dvd.jobs.cache import cache_key
+from projeto_dvd.jobs.cache import cache_key, plan_keys
 from projeto_dvd.jobs.pipeline import (
-    BD_ISO_LABEL,
     CacheUse,
     PipelineError,
     PipelineResult,
@@ -45,7 +44,7 @@ from projeto_dvd.jobs.pipeline import (
     sha256,
     tool_step,
 )
-from projeto_dvd.jobs.runner import Canceled, RunResult, Tools
+from projeto_dvd.jobs.runner import Canceled, RunResult, ToolError, Tools
 from projeto_dvd.planner.disc_plan import DiscPlan, TitlePlan
 
 TSMUXER_FAILED = "O tsMuxeR avisou um problema no disco: {line}"
@@ -90,10 +89,20 @@ def run_bluray(
     iso, log = job_dir / "disc.iso", job_dir / "tsmuxer.log"
     iso.unlink(missing_ok=True)
     begin(Step.ISO)
-    with tool_step(Step.ISO, BD_ISO_LABEL):
+    try:
         run = tools.run(tsmuxer_command(meta, iso), stdout=log)
-    problem = tsmuxer_problem(log.read_text(encoding="utf-8", errors="replace") + run.stderr)
+        failed, stderr = False, run.stderr
+    except ToolError as error:
+        failed, stderr = True, error.stderr
+    output = log.read_text(encoding="utf-8", errors="replace") + stderr
+    note(job_dir, "tsMuxeR:\n" + output.rstrip())
+    problem = tsmuxer_problem(output)
+    if failed and problem is None:
+        problem = next((line.strip() for line in reversed(output.splitlines()) if line.strip()),
+                       "sem mensagem")  # fmt: skip
     if problem:
+        if cache is not None:  # the video may be what tsMuxeR refused: encode it again
+            jobs_cache.purge(cache.work_dir, plan_keys(plan, cache.ffmpeg))
         raise PipelineError(TSMUXER_FAILED.format(line=problem), Step.ISO)
     for path in (inputs.video, *inputs.audio, *inputs.subtitles):
         path.unlink(missing_ok=True)

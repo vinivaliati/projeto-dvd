@@ -31,7 +31,7 @@ def test_h264_copy_is_annex_b() -> None:
 
 @pytest.mark.parametrize(
     ("audio", "suffix"),
-    [(choice(), ".ac3"), (choice(codec="dts"), ".dts"), (choice(codec="pcm_s24le"), ".wav"),
+    [(choice(), ".ac3"), (choice(codec="dts"), ".dts"), (choice(codec="pcm_s24le"), ".mka"),
      (choice("ac3", codec="truehd"), ".ac3")],
 )  # fmt: skip
 def test_audio_suffix(audio: AudioChoice, suffix: str) -> None:
@@ -47,10 +47,11 @@ def test_copied_audio_is_cut_to_the_movie() -> None:
 
 def test_lpcm_with_a_delay_is_padded_without_loss() -> None:
     command = audio_es_command(SOURCE, choice(codec="pcm_s24le", channels=2, offset=0.5), 60.0,
-                               Path("/j/a1.wav"))  # fmt: skip
+                               Path("/j/a1.mka"))  # fmt: skip
 
     assert command[command.index("-af") + 1] == "adelay=500:all=1"
-    assert command[-5:] == ["-c:a", "pcm_s24le", "-f", "wav", "/j/a1.wav"]
+    # Matroska, not WAV: a long 5.1 track passes the 4 GiB a WAV header can say (tested).
+    assert command[-5:] == ["-c:a", "pcm_s24le", "-f", "matroska", "/j/a1.mka"]
 
 
 def test_converted_audio_keeps_the_delay_and_the_layout() -> None:

@@ -13,7 +13,7 @@ from projeto_dvd.encode.bd_extract import audio_suffix
 from projeto_dvd.planner.disc_plan import DiscPlan
 from projeto_dvd.planner.languages import ISO_639_2
 
-AUDIO_CODECS = {".ac3": "A_AC3", ".dts": "A_DTS", ".wav": "A_LPCM"}
+AUDIO_CODECS = {".ac3": "A_AC3", ".dts": "A_DTS", ".mka": "A_LPCM"}
 TO_ISO_639_2 = {short: long for long, short in reversed(ISO_639_2.items())}  # bibliographic
 # DejaVu Sans as on the DVD, scaled to the frame (26 px at 480 lines, a 10% margin).
 TEXT_STYLE = {1080: (58, 4, 108), 720: (39, 3, 72)}  # font size, border, bottom offset
@@ -46,11 +46,15 @@ def bd_meta(plan: DiscPlan, inputs: BdInputs) -> str:
         f'V_MPEG4/ISO/AVC, "{inputs.video}", fps=23.976',
     ]
     for n, (track, path) in enumerate(zip(title.audio, inputs.audio, strict=True)):
-        codec = AUDIO_CODECS[audio_suffix(track)]
+        suffix = audio_suffix(track)
+        codec = AUDIO_CODECS[suffix]
+        source = ", track=1" if suffix == ".mka" else ""  # LPCM rides in Matroska
         default = ", default" if n == 0 else ""
-        lines.append(f'{codec}, "{path}", lang={iso_639_2(track.language)}{default}')
-    for n, (choice, path) in enumerate(zip(title.subtitles, inputs.subtitles, strict=True), 1):
-        on = ", default=all" if n == plan.subtitle_on else ""
+        lines.append(f'{codec}, "{path}"{source}, lang={iso_639_2(track.language)}{default}')
+    # subtitle_on is the position of the language on the disc; this title may lack some.
+    on_track = title.subtitle_map[plan.subtitle_on - 1] if plan.subtitle_on else None
+    for n, (choice, path) in enumerate(zip(title.subtitles, inputs.subtitles, strict=True)):
+        on = ", default=all" if n == on_track else ""
         language = f"lang={iso_639_2(choice.language)}"
         if choice.codec == "pgs":
             lines.append(f'S_HDMV/PGS, "{path}", {language}{on}')
