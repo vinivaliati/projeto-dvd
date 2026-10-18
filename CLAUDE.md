@@ -292,7 +292,8 @@ validado com teste antes de virar padrão.
 - Áudio: copia AC-3 até 640k, DTS core, DTS-HD MA/HRA e LPCM 16/24 a 48 kHz; o resto (TrueHD sem
   núcleo, E-AC-3, AAC...) vira AC-3 (640k de 3 a 6 canais, 256k estéreo, 128k mono). O tsMuxeR
   ignora o atraso do MKV: cada faixa é extraída alinhada (LPCM com silêncio; AC-3/DTS atrasado
-  mais de 1 quadro é convertido com `adelay`).
+  mais de 1 quadro é convertido com `adelay`). LPCM vai em `.mka` (`track=1`): um WAV não passa
+  de 4 GiB, e um 5.1 de 24 bits chega lá em 83 minutos (testado na imagem).
 - Legendas: PGS copiado (`.sup`); SRT e texto do MKV como `S_TEXT/UTF8` (DejaVu Sans 58, borda 4,
   108 de margem em 1080p), em UTF-8 sem BOM e **terminado em linha em branco** (sem ela o
   tsMuxeR descarta a última legenda).
