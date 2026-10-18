@@ -12,6 +12,12 @@ from sqlmodel import Session
 from projeto_dvd.library.scan import FolderView, Status, folder_view
 from projeto_dvd.menus.theme import available_backdrops, backdrop_path
 from projeto_dvd.metadata.curation import confirmed_infos
+from projeto_dvd.planner.bd_source import (
+    HeaderReport,
+    parse_trace_headers,
+    trace_headers_command,
+)
+from projeto_dvd.planner.calculator import suggest_profile
 from projeto_dvd.planner.disc import DiscTitle, disc_titles, suggest_choices
 from projeto_dvd.planner.disc_build import (
     TitleSource,
@@ -22,7 +28,7 @@ from projeto_dvd.planner.disc_build import (
     profile_for,
 )
 from projeto_dvd.planner.disc_plan import DiscChoices, DiscPlan, MenuPlan
-from projeto_dvd.planner.profiles import PROFILES
+from projeto_dvd.planner.profiles import PROFILES, Medium
 from projeto_dvd.planner.source import (
     FRAMES_UNREADABLE,
     VideoMode,
@@ -75,11 +81,33 @@ def suggestion(titles: tuple[DiscTitle, ...], folder: str) -> DiscChoices:
     return suggest_choices(titles, folder, profile_for(titles, folder))
 
 
-def prepare_title(title: DiscTitle, capture: Capture) -> TitleSource | tuple[str, ...]:
-    """The video mode, with the frame scan of MPEG-2 rips (up to 2 minutes each)."""
-    check = check_video(title.summary)
+def prepare_title(
+    title: DiscTitle,
+    capture: Capture,
+    medium: Medium = "dvd",
+    trace: Capture | None = None,
+) -> TitleSource | tuple[str, ...]:
+    """The video mode, with the frame scan of MPEG-2 rips (up to 2 minutes each).
+
+    A Blu-ray copy (``trace`` given) first samples the SPS and slice headers and the GOPs; a
+    sample that cannot be read just means the video is encoded.
+    """
+    check = check_video(title.summary, medium)
     if check.reasons:
         return check.reasons
+    if medium == "bluray":
+        if trace is None:
+            return TitleSource(title, VideoMode.FILM, True)
+        video = title.summary.video
+        assert video is not None
+        try:
+            headers = parse_trace_headers(trace(trace_headers_command(title.video.absolute,
+                                                                      video.index)))  # fmt: skip
+            frames = capture(frame_scan_command(title.video.absolute, title.summary.duration or 0))
+            gop = max_gop_fields(frames) // 2  # progressive: two fields a frame
+        except (OSError, subprocess.SubprocessError, ValueError):
+            headers, gop = HeaderReport(hrd=False, slices=0, max_dec_frame_buffering=None), None
+        return TitleSource(title, VideoMode.FILM, True, headers=headers, gop_frames=gop)
     mode, top_field_first = check.mode, check.top_field_first
     if check.needs_frame_scan:
         try:
@@ -93,6 +121,15 @@ def prepare_title(title: DiscTitle, capture: Capture) -> TitleSource | tuple[str
         return TitleSource(title, mode, top_field_first, max_gop_fields(frames))
     assert mode is not None
     return TitleSource(title, mode, top_field_first)
+
+
+def run_trace(command: list[str]) -> str:
+    """stderr of a command: trace_headers prints there."""
+    result = subprocess.run(
+        command, capture_output=True, text=True, errors="replace",
+        timeout=FRAME_SCAN_TIMEOUT, check=True,
+    )  # fmt: skip
+    return result.stderr
 
 
 def run_capture(command: list[str]) -> str:
@@ -127,7 +164,7 @@ def disc_menu(
 
 def suggested_disc_plan(
     session: Session, media_dir: Path, output_dir: Path, name: str, folder: Path,
-    capture: Capture,
+    capture: Capture, medium: Medium = "dvd",
 ) -> DiscPlan | tuple[str, ...]:  # fmt: skip
     """The disc with every suggestion taken and the low quality accepted (dev command, tests)."""
     view, titles = load_disc(session, media_dir, name, folder)
@@ -135,11 +172,16 @@ def suggested_disc_plan(
     if reasons or not titles:
         return reasons or ("Nada para gerar.",)
     choices = suggestion(titles, name)
+    if PROFILES[choices.profile].medium != medium:
+        estimates = [e for e in disc_estimates(choices, titles, name)
+                     if e.profile.medium == medium]  # fmt: skip
+        choices = choices.model_copy(update={"profile": suggest_profile(estimates).key})
     backdrops = available_backdrops(output_dir, name)
     if backdrops:
         theme = choices.theme.model_copy(update={"backdrop": backdrops[0]})
         choices = choices.model_copy(update={"theme": theme})
-    sources = [prepare_title(title, capture) for title in titles]
+    trace = run_trace if medium == "bluray" else None
+    sources = [prepare_title(title, capture, medium, trace) for title in titles]
     problems = [reason for s in sources if isinstance(s, tuple) for reason in s]
     if problems:
         return tuple(problems)
@@ -148,6 +190,6 @@ def suggested_disc_plan(
     errors = disc_errors(choices, titles, estimate, confirm_low=True)
     if errors:
         return tuple(errors)
-    menu = disc_menu(choices, titles, name, output_dir)
+    menu = disc_menu(choices, titles, name, output_dir) if medium == "dvd" else None
     ready = [s for s in sources if isinstance(s, TitleSource)]
     return build_disc_plan(name, ready, choices, menu, confirm_low=True, replace_iso=True)

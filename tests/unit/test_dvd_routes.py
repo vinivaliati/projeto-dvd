@@ -131,11 +131,11 @@ def queued_plan(client: TestClient, location: str) -> DiscPlan:
 
 
 def test_folder_offers_the_disc_builder_after_the_scan(client: TestClient) -> None:
-    assert '/folders/Filme/dvd">Montar DVD' in scan(client)
+    assert '/folders/Filme/dvd">Montar disco' in scan(client)
 
 
 def test_a_folder_with_several_videos_can_become_a_disc(client: TestClient) -> None:
-    assert '/folders/Dois/dvd">Montar DVD' in scan(client, "Dois")
+    assert '/folders/Dois/dvd">Montar disco' in scan(client, "Dois")
 
 
 def test_unscanned_folder_asks_for_a_scan(client: TestClient) -> None:
@@ -155,12 +155,12 @@ def test_page_shows_the_suggestions_without_saving(client: TestClient) -> None:
 
     assert page.status_code == 200
     text = html.unescape(page.text)
-    assert "Montar DVD de" in text and "1080p, 23,976 quadros/s" in text
+    assert "Montar disco de" in text and "1080p, 23,976 quadros/s" in text
     assert 'name="first_audio" value="pt" checked' in text  # Portuguese plays first
     assert 'name="audio" value="en" checked' in text and "Inglês" in text
-    assert "/folders/Filme/dvd/menu.png?page=0&v=" in text
+    assert "Sem menu por enquanto" in text  # an HD movie: Blu-ray suggested
     assert "sugerido" in text and "Ótima" in text
-    assert "A geração leva cerca de 24 min" in text
+    assert "A geração leva cerca de 2h00" in text  # HD: Blu-ray suggested, x264 at real time
     assert saved(client) is None
 
 
@@ -302,7 +302,7 @@ def test_second_click_goes_to_the_same_job(client: TestClient) -> None:
     assert again.headers["location"] == first.headers["location"]
     assert form.headers["location"] == first.headers["location"]
     assert still_saving.status_code == 200
-    assert "Gerando DVD" in client.get("/folders/Filme").text
+    assert "Gerando disco" in client.get("/folders/Filme").text
 
 
 def test_create_with_errors_keeps_the_page(client: TestClient) -> None:
@@ -529,7 +529,8 @@ def test_the_radios_check_their_language_on_the_page(client: TestClient) -> None
 
     page = client.get("/folders/Filme/dvd").text
 
-    assert page.count("closest('.track').querySelector('input[type=checkbox]').checked = true") == 3
+    # Two audio languages and, on the suggested Blu-ray, two subtitles (the English is a PGS).
+    assert page.count("closest('.track').querySelector('input[type=checkbox]').checked = true") == 4
 
 
 def test_the_preflight_knows_the_cache_is_on(
@@ -647,3 +648,90 @@ def test_saving_the_disc_keeps_the_cover(client: TestClient) -> None:
 
     choices = saved(client)
     assert choices is not None and choices.cover == cover and choices.theme.side == "right"
+
+
+# Blu-ray (Phase 6a)
+
+
+def test_an_hd_video_offers_blu_ray_and_suggests_it(client: TestClient) -> None:
+    page = html.unescape(scan(client) and client.get("/folders/Filme/dvd").text)
+
+    assert "Montar disco de" in page
+    assert 'value="bd25" checked' in page and 'value="bd50"' in page
+    assert "BD-25 · camada única, 25 GB" in page
+    assert "Sem menu por enquanto" in page and 'id="menu-preview"' not in page
+    assert "Gerar disco" in page
+
+
+def test_a_folder_with_two_videos_says_why_there_is_no_blu_ray(client: TestClient) -> None:
+    scan(client, "Dois")
+
+    page = html.unescape(client.get("/folders/Dois/dvd").text)
+
+    assert 'value="bd25"' not in page
+    assert "Blu-ray: um título por disco nesta fase." in page
+
+
+def test_changing_the_medium_reloads_the_page(client: TestClient) -> None:
+    scan(client)
+
+    to_dvd = client.post("/folders/Filme/dvd/choices", headers=SAME, data=disc_form())
+    same = client.post("/folders/Filme/dvd/choices", headers=SAME, data=disc_form(minutes="6"))
+    back = client.post("/folders/Filme/dvd/choices", headers=SAME, data=disc_form(profile="bd25"))
+
+    assert to_dvd.headers.get("HX-Refresh") == "true"
+    assert "HX-Refresh" not in same.headers
+    assert back.headers.get("HX-Refresh") == "true"
+
+
+def test_blu_ray_offers_the_pgs_subtitles(client: TestClient) -> None:
+    scan(client)
+    client.post("/folders/Filme/dvd/choices", headers=SAME, data=disc_form(profile="bd25"))
+
+    page = html.unescape(client.get("/folders/Filme/dvd").text)
+
+    assert 'name="subtitle" value="en"' in page  # the English PGS of the movie
+    assert "recodificado: perfil desconhecido" in page
+
+
+def test_generating_a_blu_ray_queues_a_plan_without_menu(client: TestClient) -> None:
+    scan(client)
+
+    response = client.post("/folders/Filme/dvd", headers=SAME, follow_redirects=False,
+                           data=disc_form(profile="bd25", subtitle=["pt", "en"]))  # fmt: skip
+
+    assert response.status_code == 303
+    plan = queued_plan(client, response.headers["location"])
+    assert (plan.profile, plan.menu, plan.iso_name) == ("bd25", None, "Filme (BD).iso")
+    assert [s.codec for s in plan.titles[0].subtitles] == ["text", "pgs"]
+    job_page = html.unescape(client.get(response.headers["location"]).text)
+    assert "Blu-ray de" in job_page and "Montando o Blu-ray (tsMuxeR)" in job_page
+
+
+def test_the_folder_button_says_disc(client: TestClient) -> None:
+    assert '/folders/Filme/dvd">Montar disco' in scan(client)
+
+
+def test_the_blu_ray_page_marks_the_suggestion_and_says_the_movie_starts(
+    client: TestClient,
+) -> None:
+    scan(client)
+
+    page = html.unescape(client.get("/folders/Filme/dvd").text)
+
+    card = page[page.index('value="bd25"') : page.index('value="bd50"')]
+    assert "sugerido" in card
+    assert "o filme começa" in page and "o menu abre" not in page
+    assert "Recodificar o vídeo" not in page  # this file cannot be copied anyway
+
+
+def test_a_stale_blu_ray_form_for_a_folder_that_cannot_be_one_is_refused(
+    client: TestClient,
+) -> None:
+    scan(client, "Dois")
+    form = disc_form(order=["Dois/a.mkv", "Dois/b.mkv"], profile="bd25")
+
+    response = client.post("/folders/Dois/dvd/choices", headers=SAME, data=form)
+
+    assert response.status_code == 200 and "Formulário inválido" in response.text
+    assert saved(client, "Dois") is None

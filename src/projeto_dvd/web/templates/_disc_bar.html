@@ -1,4 +1,4 @@
 <div id="disc-bar" class="disc-bar" aria-live="polite"{% if oob %} hx-swap-oob="true"{% endif %}>
-  <span class="numbers">{{ chosen.profile.name }} · <span class="quality quality-{{ {'Ótima': 'great', 'Aceitável': 'ok', 'Baixa': 'low', 'Não cabe': 'none'}[chosen.quality] }}">{{ chosen.quality }}</span> · {% if chosen.video_kbps %}vídeo a {{ "%.1f" | format(chosen.video_kbps / 1000) | replace(".", ",") }} Mbps{% else %}vídeo copiado do DVD{% endif %}</span>
+  <span class="numbers">{{ chosen.profile.name }} · <span class="quality quality-{{ {'Ótima': 'great', 'Aceitável': 'ok', 'Baixa': 'low', 'Não cabe': 'none'}[chosen.quality] }}">{{ chosen.quality }}</span> · {% if chosen.video_kbps %}vídeo a {{ "%.1f" | format(chosen.video_kbps / 1000) | replace(".", ",") }} Mbps{% else %}vídeo copiado{% endif %}</span>
   <a href="#profiles">Ver disco</a>
 </div>

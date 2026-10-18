@@ -11,7 +11,7 @@ from projeto_dvd.planner.calculator import (
     menu_bytes,
     suggest_profile,
 )
-from projeto_dvd.planner.profiles import DVD5, DVD9, PROFILES, DiscProfile
+from projeto_dvd.planner.profiles import BD25, BD50, DVD5, DVD9, PROFILES, DiscProfile, medium_of
 
 TWO_HOURS = 7200.0
 
@@ -19,7 +19,7 @@ TWO_HOURS = 7200.0
 def test_profiles_use_the_smallest_sector_count() -> None:
     assert DVD5.capacity_bytes == 4_700_372_992
     assert DVD9.capacity_bytes == 8_543_666_176
-    assert list(PROFILES) == ["dvd5", "dvd9"]
+    assert list(PROFILES) == ["dvd5", "dvd9", "bd25", "bd50"]
 
 
 def test_usable_bytes_is_97_percent_minus_4_mib() -> None:
@@ -69,9 +69,9 @@ def test_estimated_size_fits_the_margin_when_not_capped() -> None:
 
 
 def test_suggests_the_first_great_profile() -> None:
-    short = [estimate(p, 5400.0, [448], 0) for p in PROFILES.values()]
-    long = [estimate(p, TWO_HOURS, [448], 0) for p in PROFILES.values()]
-    huge = [estimate(p, 9 * 3600.0, [448], 0) for p in PROFILES.values()]
+    short = [estimate(p, 5400.0, [448], 0) for p in (DVD5, DVD9)]
+    long = [estimate(p, TWO_HOURS, [448], 0) for p in (DVD5, DVD9)]
+    huge = [estimate(p, 9 * 3600.0, [448], 0) for p in (DVD5, DVD9)]
 
     assert suggest_profile(short) == DVD5
     assert suggest_profile(long) == DVD9
@@ -168,3 +168,43 @@ def test_a_disc_of_copies_only_is_great_when_it_fits() -> None:
     assert too_big.quality == Quality.DOES_NOT_FIT
     expected = (6 * 10**9 * 8 / 1000 + 7200 * 448) * 1000 * 1.03 / 8
     assert fits.size_bytes == int(expected) + DVD9.reserve_bytes + menu_bytes(1)
+
+
+def test_blu_ray_profiles() -> None:
+    assert BD25.capacity_bytes == 25_025_314_816
+    assert BD50.capacity_bytes == 50_050_629_632
+    assert BD25.usable_bytes == int(0.97 * 25_025_314_816) - 64 * 1024 * 1024
+    assert (medium_of("bd50"), medium_of("dvd9")) == ("bluray", "dvd")
+
+
+def test_blu_ray_maxrate_leaves_room_for_audio_subtitles_and_the_transport_stream() -> None:
+    assert maxrate_kbps(BD25, [640], 2) == 35_000
+    assert maxrate_kbps(BD25, [9216, 640, 640], 4) == 48_000 - 10_496 - 2_000 - 2_717
+
+
+@pytest.mark.parametrize(
+    ("kbps", "quality"),
+    [(15_000, Quality.GREAT), (10_000, Quality.ACCEPTABLE), (5_000, Quality.LOW),
+     (2_000, Quality.DOES_NOT_FIT)],
+)  # fmt: skip
+def test_blu_ray_quality_bands(kbps: int, quality: Quality) -> None:
+    # A duration that gives exactly that video bitrate on a BD-25 with one 640k track.
+    room = BD25.usable_bytes * 8 / (1 + BD25.mux_overhead) / 1000
+    duration = room / (kbps + 640 + 0.5)  # rounding never drops below the band
+    assert estimate(BD25, duration, [640], 0).quality == quality
+
+
+def test_hd_sources_suggest_blu_ray() -> None:
+    estimates = [estimate(p, TWO_HOURS, [640], 0) for p in PROFILES.values()]
+
+    assert suggest_profile(estimates).key == "dvd9"
+    assert suggest_profile(estimates, hd=True).key == "bd25"
+
+
+def test_hd_without_a_great_blu_ray_takes_the_largest_one() -> None:
+    long = 60 * 3600.0
+    estimates = [estimate(p, long, [640], 0) for p in PROFILES.values()]
+
+    assert suggest_profile(estimates, hd=True).key == "bd50"
+    dvd_only = [estimate(p, TWO_HOURS, [448], 0) for p in (DVD5, DVD9)]
+    assert suggest_profile(dvd_only, hd=True).key == "dvd9"

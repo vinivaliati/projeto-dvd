@@ -323,7 +323,7 @@ def test_reconcile_drops_removed_videos_and_appends_new_ones() -> None:
 def test_reconcile_drops_what_no_longer_exists() -> None:
     titles = [title("P/a.mkv", [audio(1, "por")], [sub(2, "por")])]
     suggestion = suggest_choices(titles, "P", dvd9)
-    saved = choices(profile="bd25", audio=("en", "pt"), subtitles=("en", "pt"), subtitle_on="en",
+    saved = choices(profile="hddvd", audio=("en", "pt"), subtitles=("en", "pt"), subtitle_on="en",
                     theme=Theme(backdrop="Gone (2001)", accent="azul"))  # fmt: skip
     result = reconcile(saved.model_dump_json(), titles, suggestion, ("A (2001)",))
     assert (result.profile, result.audio, result.subtitles) == ("dvd9", ("pt",), ("pt",))
@@ -488,3 +488,32 @@ def test_the_video_size_from_the_file(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_a_title_without_video_has_no_size_and_is_no_rip() -> None:
     blind = replace(rip(), summary=replace(rip().summary, video=None))
     assert video_size(blind) is None and not is_rip(blind)
+
+
+def test_blu_ray_prefers_the_track_it_can_copy() -> None:
+    found = title("P/a.mkv", [audio(1, "eng", 8, codec_name="truehd"), audio(2, "eng", 6)])
+    master = audio(2, "eng", 8, codec_name="dts", profile="DTS-HD MA")
+    lossless = title("P/b.mkv", [audio(1, "eng", 6), master])
+
+    assert best_audio(found, "en").index == 1  # type: ignore[union-attr]  # DVD: more channels
+    assert best_audio(found, "en", "bluray").index == 2  # type: ignore[union-attr]
+    assert best_audio(lossless, "en", "bluray").index == 2  # type: ignore[union-attr]
+
+
+def test_subtitle_languages_follow_the_medium() -> None:
+    titles = [title("P/a.mkv", subtitles=[sub(2, "por", codec="hdmv_pgs_subtitle"), sub(3, "eng")])]
+
+    assert subtitle_languages(titles) == ("en",)
+    assert subtitle_languages(titles, "bluray") == ("pt", "en")
+    assert best_subtitle(titles[0], "pt", "bluray") is not None
+    assert best_subtitle(titles[0], "pt") is None
+
+
+def test_reconcile_keeps_the_pgs_languages_only_on_blu_ray() -> None:
+    titles = [title("P/a.mkv", subtitles=[sub(2, "por", codec="hdmv_pgs_subtitle")])]
+    suggestion = suggest_choices(titles, "P", dvd9)
+    on_bd = choices(profile="bd25", subtitles=("pt",), subtitle_on="pt").model_dump_json()
+    on_dvd = choices(profile="dvd9", subtitles=("pt",), subtitle_on="pt").model_dump_json()
+
+    assert reconcile(on_bd, titles, suggestion, ()).subtitles == ("pt",)
+    assert reconcile(on_dvd, titles, suggestion, ()).subtitles == ()

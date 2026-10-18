@@ -173,6 +173,7 @@ def test_movie_summary() -> None:
             title="Comentario",
             default=False,
             forced=False,
+            profile="LC",
         ),
     )
     assert summary.subtitles == (
@@ -394,3 +395,38 @@ def test_a_stream_without_size_or_header() -> None:
               "height": 1080, "tags": {"NUMBER_OF_BYTES": "abc"}}  # fmt: skip
     video = summarize({"streams": [stream]}).video
     assert video is not None and (video.stream_bytes, video.dvd_header) == (None, None)
+
+
+def test_video_codec_details_for_blu_ray() -> None:
+    data = probe_data(video_stream(profile="High", level=41, pix_fmt="yuv420p",
+                                   sample_aspect_ratio="4:3"))  # fmt: skip
+
+    video = summarize(data).video
+
+    assert video is not None
+    assert (video.profile, video.level, video.pix_fmt, video.sar) == (
+        "High",
+        41,
+        "yuv420p",
+        Fraction(4, 3),
+    )
+    old = summarize(probe_data(video_stream(sample_aspect_ratio="0:1"))).video
+    assert old is not None and (old.profile, old.level, old.pix_fmt, old.sar) == (
+        None,
+        None,
+        None,
+        None,
+    )
+
+
+@pytest.mark.parametrize(
+    ("fields", "bits"),
+    [({"bits_per_raw_sample": "24", "sample_fmt": "s32"}, 24), ({"sample_fmt": "s16"}, 16),
+     ({"sample_fmt": "fltp"}, None), ({}, None)],
+)  # fmt: skip
+def test_audio_profile_and_bits(fields: dict[str, Any], bits: int | None) -> None:
+    stream = {"codec_type": "audio", "codec_name": "dts", "profile": "DTS-HD MA", **fields}
+
+    track = summarize(probe_data(video_stream(), stream)).audio[0]
+
+    assert (track.profile, track.bits) == ("DTS-HD MA", bits)

@@ -53,6 +53,11 @@ class Video:
     # header limits ("CPB properties": max bit rate, VBV buffer size). Phase 4b.
     stream_bytes: int | None = None
     dvd_header: tuple[int, int] | None = None
+    # Phase 6a: what decides a Blu-ray copy.
+    profile: str | None = None  # "High", "Main", "High 10"
+    level: int | None = None  # 41 for level 4.1
+    pix_fmt: str | None = None
+    sar: Fraction | None = None  # sample aspect ratio; None when unknown
 
 
 @dataclass(frozen=True)
@@ -68,6 +73,8 @@ class AudioTrack:
     title: str | None
     default: bool
     forced: bool
+    profile: str | None = None  # "DTS-HD MA", "DTS"; Phase 6a
+    bits: int | None = None  # bits per sample of PCM-like tracks
 
 
 @dataclass(frozen=True)
@@ -153,6 +160,9 @@ def summarize(data: dict[str, Any]) -> Summary:
     )
 
 
+SAMPLE_BITS = {"s16": 16, "s16p": 16, "s32": 32, "s32p": 32}
+
+
 def _video(stream: dict[str, Any]) -> Video:
     width = int(stream.get("width") or 0)
     height = int(stream.get("height") or 0)
@@ -179,6 +189,10 @@ def _video(stream: dict[str, Any]) -> Video:
         start_time=_float(stream.get("start_time")) or 0.0,
         stream_bytes=_stream_bytes(stream),
         dvd_header=_dvd_header(stream),
+        profile=stream.get("profile") or None,
+        level=_int(stream.get("level")),
+        pix_fmt=stream.get("pix_fmt") or None,
+        sar=_fraction((stream.get("sample_aspect_ratio") or "").replace(":", "/")),
     )
 
 
@@ -223,6 +237,9 @@ def _audio(stream: dict[str, Any]) -> AudioTrack:
         title=_tags(stream).get("title"),
         default=_disposition(stream, "default"),
         forced=_disposition(stream, "forced"),
+        profile=stream.get("profile") or None,
+        bits=_int(stream.get("bits_per_raw_sample"))
+        or SAMPLE_BITS.get(str(stream.get("sample_fmt"))),
     )
 
 

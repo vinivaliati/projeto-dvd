@@ -17,10 +17,13 @@ from pathlib import Path
 
 from projeto_dvd.encode import mpeg2
 from projeto_dvd.encode.video import video_pass_command
+from projeto_dvd.encode.x264 import x264_pass_command
 from projeto_dvd.jobs.runner import RunResult
 from projeto_dvd.planner.disc_plan import DiscPlan
+from projeto_dvd.planner.profiles import medium_of
 
-NAME = re.compile(r"^[0-9a-f]{64}\.(m2v|json)$")
+NAME = re.compile(r"^[0-9a-f]{64}\.(m2v|h264|json)$")
+VIDEO_SUFFIXES = (".m2v", ".h264")  # the DVD video, and the Blu-ray video (Phase 6a)
 KEPT_PROGRESS = ("frame", "dup_frames", "drop_frames", "out_time_us")
 
 
@@ -30,17 +33,18 @@ def cache_dir(work_dir: Path) -> Path:
 
 def cache_key(disc: DiscPlan, number: int, ffmpeg_version: str | None) -> str:
     title = disc.titles[number - 1]
-    fields = {
-        "source": [title.path, title.size, title.mtime_ns],
-        # Fixed paths and output name: the same encode in another job folder, or of the same
-        # title at another position on the disc, is the same video.
-        "command": [
-            *video_pass_command(disc, number, Path("/media") / title.path, Path("/job"), 2)[:-1],
-            "/job/video.m2v",
-        ],
-        "pulldown": mpeg2.PULLDOWN_VERSION,
-        "ffmpeg": ffmpeg_version,
-    }
+    source = Path("/media") / title.path
+    # Fixed paths and output name: the same encode in another job folder, or of the same title
+    # at another position on the disc, is the same video.
+    if medium_of(disc.profile) == "bluray":
+        command = x264_pass_command(source, title, disc.video_kbps, disc.maxrate_kbps, 2,
+                                    Path("/job/x264"), Path("/job/video.h264"))  # fmt: skip
+        fields: dict[str, object] = {"command": command}
+    else:
+        command = [*video_pass_command(disc, number, source, Path("/job"), 2)[:-1],
+                   "/job/video.m2v"]  # fmt: skip
+        fields = {"command": command, "pulldown": mpeg2.PULLDOWN_VERSION}
+    fields |= {"source": [title.path, title.size, title.mtime_ns], "ffmpeg": ffmpeg_version}
     return hashlib.sha256(json.dumps(fields, sort_keys=True).encode()).hexdigest()
 
 
@@ -50,7 +54,7 @@ def plan_keys(disc: DiscPlan, ffmpeg_version: str | None) -> list[str]:
 
 def lookup(work_dir: Path, key: str, target: Path) -> RunResult | None:
     """Link the cached video to `target`; None when there is no usable entry."""
-    video, meta = _paths(work_dir, key)
+    video, meta = _paths(work_dir, key, target.suffix)
     try:
         info = json.loads(meta.read_text())
         if video.stat().st_size != info["size"]:
@@ -64,18 +68,18 @@ def lookup(work_dir: Path, key: str, target: Path) -> RunResult | None:
         return None
 
 
-def store(work_dir: Path, key: str, m2v: Path, pass2: RunResult) -> None:
+def store(work_dir: Path, key: str, encoded: Path, pass2: RunResult) -> None:
     """Keep the job's video; OSError goes to the caller (the job goes on without cache)."""
-    video, meta = _paths(work_dir, key)
+    video, meta = _paths(work_dir, key, encoded.suffix)
     video.parent.mkdir(parents=True, exist_ok=True)
     with contextlib.suppress(FileExistsError):
-        os.link(m2v, video)
+        os.link(encoded, video)
     progress = {k: pass2.progress[k] for k in KEPT_PROGRESS if k in pass2.progress}
     meta.write_text(json.dumps({"size": video.stat().st_size, "progress": progress}))
 
 
 def cache_bytes(work_dir: Path) -> int:
-    return sum(path.stat().st_size for path in _entries(work_dir, ".m2v"))
+    return sum(path.stat().st_size for path in _entries(work_dir))
 
 
 def evict(work_dir: Path, limit_bytes: int, keep: Collection[str]) -> int:
@@ -83,7 +87,7 @@ def evict(work_dir: Path, limit_bytes: int, keep: Collection[str]) -> int:
 
     OSError (an entry removed by "Limpar cache" in between, a permission) goes to the caller.
     """
-    videos = sorted(_entries(work_dir, ".m2v"), key=lambda path: path.stat().st_mtime)
+    videos = sorted(_entries(work_dir), key=lambda path: path.stat().st_mtime)
     total = sum(path.stat().st_size for path in videos)
     freed = 0
     for video in videos:
@@ -116,12 +120,13 @@ def clean(work_dir: Path) -> int:
     return removed
 
 
-def _paths(work_dir: Path, key: str) -> tuple[Path, Path]:
+def _paths(work_dir: Path, key: str, suffix: str) -> tuple[Path, Path]:
     folder = cache_dir(work_dir)
-    return folder / f"{key}.m2v", folder / f"{key}.json"
+    return folder / f"{key}{suffix}", folder / f"{key}.json"
 
 
-def _entries(work_dir: Path, suffix: str) -> list[Path]:
+def _entries(work_dir: Path) -> list[Path]:
+    """The cached videos, DVD and Blu-ray."""
     folder = cache_dir(work_dir)
     if not folder.is_dir():
         return []
@@ -129,12 +134,13 @@ def _entries(work_dir: Path, suffix: str) -> list[Path]:
         path
         for path in folder.iterdir()
         if NAME.match(path.name)
-        and path.suffix == suffix
+        and path.suffix in VIDEO_SUFFIXES
         and not path.is_symlink()
         and path.is_file()
     ]
 
 
 def _remove(work_dir: Path, key: str) -> None:
-    for path in _paths(work_dir, key):
-        path.unlink(missing_ok=True)
+    folder = cache_dir(work_dir)
+    for suffix in (*VIDEO_SUFFIXES, ".json"):
+        (folder / f"{key}{suffix}").unlink(missing_ok=True)

@@ -125,7 +125,7 @@ def test_run_capture_returns_stdout() -> None:
 
 def test_suggestion_picks_the_profile_with_the_calculator() -> None:
     choices = suggestion((title(H264, AUDIO),), "F")
-    assert (choices.profile, choices.audio, choices.order) == ("dvd5", ("pt",), ("F/f.mkv",))
+    assert (choices.profile, choices.audio, choices.order) == ("bd25", ("pt",), ("F/f.mkv",))
 
 
 def backdrop(
@@ -226,3 +226,61 @@ def test_prepare_measures_the_gop_of_a_rip() -> None:
     result = prepare_title(title(MPEG2, AUDIO), lambda c: json.dumps({"frames": sample}))
 
     assert isinstance(result, TitleSource) and result.gop_fields == 30
+
+
+def test_run_trace_returns_stderr() -> None:
+    code = "import sys; sys.stderr.write('trace')"
+    assert disc_source.run_trace([sys.executable, "-c", code]) == "trace"
+
+
+FIELDS = [
+    ("nal_hrd_parameters_present_flag", 1),
+    *(("first_mb_in_slice", mb) for mb in (0, 2040, 4080, 6120)),
+]
+TRACE = "\n".join(f"[trace_headers @ 0x1] 8 {name:<40} 1 = {value}" for name, value in FIELDS)
+GOPS = {"frames": [{"repeat_pict": 0, "interlaced_frame": 0, "top_field_first": 1,
+                    "key_frame": int(n % 24 == 0), "best_effort_timestamp_time": f"{n / 24:.4f}"}
+                   for n in range(49)]}  # fmt: skip
+
+
+def test_prepare_a_blu_ray_title_samples_headers_and_gops() -> None:
+    result = prepare_title(title(H264, AUDIO), lambda c: json.dumps(GOPS), "bluray",
+                           lambda c: TRACE)  # fmt: skip
+
+    assert isinstance(result, TitleSource)
+    assert result.headers is not None and (result.headers.hrd, result.headers.slices) == (True, 4)
+    assert result.gop_frames == 24
+
+
+def test_prepare_a_blu_ray_title_without_a_copy_runs_no_sample() -> None:
+    def never(command: list[str]) -> str:
+        raise AssertionError(command)
+
+    result = prepare_title(title(H264, AUDIO), never, "bluray")
+
+    assert isinstance(result, TitleSource) and result.headers is None
+
+
+def test_an_unreadable_sample_means_the_video_is_encoded() -> None:
+    def fails(command: list[str]) -> str:
+        raise OSError("gone")
+
+    result = prepare_title(title(H264, AUDIO), fails, "bluray", lambda c: TRACE)
+
+    assert isinstance(result, TitleSource)
+    assert result.headers is not None and not result.headers.hrd
+
+
+def test_prepare_refuses_sd_on_blu_ray() -> None:
+    assert prepare_title(title(MPEG2, AUDIO), lambda c: "", "bluray") == (source.BD_SD,)
+
+
+def test_suggested_blu_ray_plan(session: Session, tmp_path: Path) -> None:
+    scanned(session, tmp_path, "a.mkv", probe={"streams": [H264, AUDIO],
+                                                "format": {"duration": "600"}})  # fmt: skip
+
+    result = suggested_disc_plan(session, tmp_path, tmp_path, "F", tmp_path / "F",
+                                 lambda c: json.dumps(GOPS), medium="bluray")  # fmt: skip
+
+    assert not isinstance(result, tuple)
+    assert (result.profile, result.menu, result.iso_name) == ("bd25", None, "F (BD).iso")

@@ -15,10 +15,10 @@ from projeto_dvd.config import Settings
 from projeto_dvd.db.models import Job
 from projeto_dvd.jobs import cache, store
 from projeto_dvd.jobs.files import clean_job_dir, log_tail, temporary_bytes
-from projeto_dvd.jobs.pipeline import DISC_STEPS, STEP_LABELS, TITLE_STEPS, Step, preflight
+from projeto_dvd.jobs.pipeline import TITLE_STEPS, Step, preflight, step_label, steps_for
 from projeto_dvd.jobs.store import ACTIVE, JobStatus
 from projeto_dvd.planner.disc_plan import DiscPlan, TitlePlan
-from projeto_dvd.planner.profiles import PROFILES
+from projeto_dvd.planner.profiles import PROFILES, medium_of
 from projeto_dvd.planner.source import VideoMode
 
 router = APIRouter()
@@ -52,6 +52,10 @@ class JobView:
     now: datetime
     can_resume: bool
     resume_errors: tuple[str, ...] = ()
+
+    @property
+    def medium(self) -> str:
+        return "Blu-ray" if medium_of(self.plan.profile) == "bluray" else "DVD"
 
 
 def job_view(session: Session, settings: Settings, job: Job, now: datetime) -> JobView:
@@ -171,7 +175,8 @@ def clean_cache(request: Request, session: SessionDep, settings: SettingsDep) ->
 
 
 def _can_resume(session: Session, job: Job, plan: DiscPlan) -> bool:
-    if job.status not in (JobStatus.FAILED, JobStatus.CANCELED) or plan.menu is None:
+    phase_3 = plan.menu is None and medium_of(plan.profile) == "dvd"
+    if job.status not in (JobStatus.FAILED, JobStatus.CANCELED) or phase_3:
         return False
     latest = store.latest_job(session, job.folder)
     return latest is not None and latest.id == job.id
@@ -187,8 +192,10 @@ def _job(session: Session, job_id: int) -> Job:
 def _steps(plan: DiscPlan, job: Job) -> tuple[StepView, ...]:
     """The steps of the job. With several titles, only the current one is expanded; the
     others show as one line each, so a 24-episode disc does not list 144 steps."""
-    rows = [(n, step) for n, title in enumerate(plan.titles, 1) for step in _title_steps(title)]
-    rows += [(0, step) for step in DISC_STEPS if step != Step.MENUS or plan.menu is not None]
+    title_steps, disc_steps = steps_for(plan)
+    rows = [(n, step) for n, title in enumerate(plan.titles, 1)
+            for step in _title_steps(title, title_steps)]  # fmt: skip
+    rows += [(0, step) for step in disc_steps if step != Step.MENUS or plan.menu is not None]
     if job.status == JobStatus.DONE:
         current = len(rows)
     elif job.status == JobStatus.QUEUED:
@@ -204,16 +211,17 @@ def _steps(plan: DiscPlan, job: Job) -> tuple[StepView, ...]:
             views.append(StepView(f"Título {n} de {count}", _state(indices, current)))
             continue
         prefix = f"Título {n} de {count} · " if count > 1 else ""
-        views += [StepView(prefix + STEP_LABELS[rows[i][1]], _state([i], current)) for i in indices]
-    views += [StepView(STEP_LABELS[step], _state([i], current))
+        views += [StepView(prefix + step_label(rows[i][1], plan), _state([i], current))
+                  for i in indices]  # fmt: skip
+    views += [StepView(step_label(step, plan), _state([i], current))
               for i, (n, step) in enumerate(rows) if n == 0]  # fmt: skip
     return tuple(views)
 
 
-def _title_steps(title: TitlePlan) -> list[Step]:
+def _title_steps(title: TitlePlan, steps: tuple[Step, ...]) -> list[Step]:
     encode = (Step.VIDEO_PASS1, Step.VIDEO_PASS2, Step.PULLDOWN)
     return [
-        step for step in TITLE_STEPS
+        step for step in steps
         if not (step == Step.VIDEO_COPY and not title.copy_video)
         and not (step in encode and title.copy_video)
         and not (step == Step.PULLDOWN and title.mode != VideoMode.FILM)

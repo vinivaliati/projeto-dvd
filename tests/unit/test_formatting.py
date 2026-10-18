@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 
 from projeto_dvd.api.formatting import (
+    encode_seconds,
     format_ago,
     format_aspect,
     format_audio_codec,
@@ -219,3 +220,10 @@ def test_output_path_for_windows(host: str, path: str) -> None:
 )
 def test_encode_time(seconds: float, hd: bool, text: str) -> None:
     assert format_encode_time(seconds, hd) == text
+
+
+def test_encode_seconds_by_medium() -> None:
+    assert encode_seconds(3600.0, True, "dvd", False) == pytest.approx(720.0)
+    assert encode_seconds(3600.0, False, "dvd", False) == pytest.approx(360.0)
+    assert encode_seconds(3600.0, True, "bluray", False) == pytest.approx(3600.0)
+    assert encode_seconds(3600.0, True, "bluray", True) == pytest.approx(72.0)

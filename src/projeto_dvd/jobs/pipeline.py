@@ -92,6 +92,7 @@ from projeto_dvd.menus.render import highlight, render_page
 from projeto_dvd.planner.disc_plan import DiscPlan, TitlePlan
 from projeto_dvd.planner.disc_source import run_capture, suggested_disc_plan
 from projeto_dvd.planner.dvd_plan import SubtitleChoice
+from projeto_dvd.planner.profiles import medium_of
 from projeto_dvd.planner.source import VideoMode
 
 COPY_CHUNK = 16 * 1024 * 1024
@@ -141,8 +142,12 @@ class Step(StrEnum):
 TITLE_STEPS = (Step.VIDEO_COPY, Step.VIDEO_PASS1, Step.VIDEO_PASS2, Step.PULLDOWN, Step.AUDIO,
                Step.MUX, Step.SUBTITLES)  # fmt: skip
 DISC_STEPS = (Step.MENUS, Step.AUTHOR, Step.ISO, Step.QA, Step.COPY)
+# Phase 6a: a Blu-ray title has no pulldown and no MPEG-2 mux; tsMuxeR writes the ISO.
+BD_TITLE_STEPS = (Step.VIDEO_COPY, Step.VIDEO_PASS1, Step.VIDEO_PASS2, Step.AUDIO, Step.SUBTITLES)
+BD_DISC_STEPS = (Step.ISO, Step.QA, Step.COPY)
+BD_ISO_LABEL = "Montando o Blu-ray (tsMuxeR)"
 STEP_LABELS = {
-    Step.VIDEO_COPY: "Vídeo copiado do DVD",
+    Step.VIDEO_COPY: "Vídeo copiado da origem",
     Step.VIDEO_PASS1: "Vídeo: 1ª passada (análise)",
     Step.VIDEO_PASS2: "Vídeo: 2ª passada (codificação)",
     Step.PULLDOWN: "Ajuste de quadros para TV",
@@ -161,8 +166,7 @@ STEP_WEIGHTS = {
     Step.MUX: 4, Step.SUBTITLES: 2, Step.MENUS: 1, Step.AUTHOR: 2, Step.ISO: 2, Step.QA: 3,
     Step.COPY: 2,
 }  # fmt: skip
-TITLE_WEIGHT = sum(STEP_WEIGHTS[step] for step in TITLE_STEPS)
-TOTAL_WEIGHT = sum(STEP_WEIGHTS.values())
+Steps = tuple[tuple[Step, ...], tuple[Step, ...]]
 Report = Callable[[Step, float, int], None]  # (step, fraction, title; 0 for disc steps)
 
 
@@ -222,21 +226,36 @@ def step_text(step: Step, title: int) -> str:
     return f"{title}:{step}" if title else str(step)
 
 
+def steps_for(plan: DiscPlan) -> Steps:
+    """The title steps and the disc steps of the medium of the plan."""
+    if medium_of(plan.profile) == "bluray":
+        return BD_TITLE_STEPS, BD_DISC_STEPS
+    return TITLE_STEPS, DISC_STEPS
+
+
+def step_label(step: Step, plan: DiscPlan) -> str:
+    if step == Step.ISO and medium_of(plan.profile) == "bluray":
+        return BD_ISO_LABEL
+    return STEP_LABELS[step]
+
+
 def overall_progress(plan: DiscPlan, step: Step, fraction: float, title: int) -> float:
     """Each title weighs by its duration; the disc steps come after all titles."""
+    title_steps, disc_steps = steps_for(plan)
+    titles_weight = sum(STEP_WEIGHTS[s] for s in title_steps)
+    total_weight = titles_weight + sum(STEP_WEIGHTS[s] for s in disc_steps)
     durations = [t.duration for t in plan.titles]
     total = sum(durations) or 1.0
-    titles_weight = TITLE_WEIGHT
     if title:
         before = sum(durations[: title - 1]) / total
         share = durations[title - 1] / total
-        steps = TITLE_STEPS[: TITLE_STEPS.index(step)]
+        steps = title_steps[: title_steps.index(step)]
         within = sum(STEP_WEIGHTS[s] for s in steps) + STEP_WEIGHTS[step] * fraction
         done = titles_weight * before + share * within
     else:
-        steps = DISC_STEPS[: DISC_STEPS.index(step)]
+        steps = disc_steps[: disc_steps.index(step)]
         done = titles_weight + sum(STEP_WEIGHTS[s] for s in steps) + STEP_WEIGHTS[step] * fraction
-    return done / TOTAL_WEIGHT
+    return done / total_weight
 
 
 def run_pipeline(
@@ -254,7 +273,7 @@ def run_pipeline(
     if menu is None:
         raise PipelineError(OLD_PLAN)
     for title in plan.titles:
-        _check_source(media_dir / title.path, title)
+        check_source(media_dir / title.path, title)
     job_dir.mkdir(parents=True, exist_ok=True)
 
     def begin(step: Step, title: int = 0) -> Callable[[float], None]:
@@ -282,7 +301,7 @@ def run_pipeline(
     moved = {n: r.chapters for n, r in enumerate(results, 1) if r.chapters is not None}
     xml.write_text(disc_xml(plan, job_dir, moved), encoding="utf-8")
     shutil.rmtree(job_dir / "dvd", ignore_errors=True)  # dvdauthor appends to what exists
-    with _tool_step(Step.AUTHOR):
+    with tool_step(Step.AUTHOR):
         author = tools.run(dvdauthor_command(xml))
     vob = vob_check(job_dir / "dvd")
     for number in range(1, len(plan.titles) + 1):
@@ -290,12 +309,12 @@ def run_pipeline(
     for index in range(len(menu.pages)):
         page_file(job_dir, index).unlink()
     begin(Step.ISO)
-    with _tool_step(Step.ISO):
+    with tool_step(Step.ISO):
         tools.run(iso_command(plan, job_dir))
     shutil.rmtree(job_dir / "dvd")
     iso = job_dir / "disc.iso"
     progress = begin(Step.QA)
-    with _tool_step(Step.QA):
+    with tool_step(Step.QA):
         tree = required_tree(len(plan.titles), menus=True)
         checks = [*size_checks(iso.stat().st_size, plan), vob,
                   tree_check(tools.capture(isoinfo_command(iso)), tree)]  # fmt: skip
@@ -312,7 +331,7 @@ def run_pipeline(
                          estimated_bytes=plan.estimated_bytes)  # fmt: skip
     if not qa_report.passed:
         raise QaFailed(qa_report)
-    iso_path = _publish(iso, output_dir, plan, begin(Step.COPY), checkpoint)
+    iso_path = publish(iso, output_dir, plan, begin(Step.COPY), checkpoint)
     return PipelineResult(iso_path=iso_path, qa_json=qa_report.model_dump_json())
 
 
@@ -328,7 +347,7 @@ def _encode_title(
 ) -> TitleResult:
     title = plan.titles[number - 1]
     source = media_dir / title.path
-    _check_source(source, title)
+    check_source(source, title)
     m2v = m2v_path(job_dir, number)
     # A video left by a job that hit the cache is a hard link to it: never write through it.
     m2v.unlink(missing_ok=True)
@@ -339,14 +358,14 @@ def _encode_title(
     key = cache_key(plan, number, cache.ffmpeg) if cache else ""
     cached = jobs_cache.lookup(cache.work_dir, key, m2v) if cache else None
     if cached is not None:
-        _note(job_dir, f"Título {number}: vídeo reaproveitado do cache.")
+        note(job_dir, f"Título {number}: vídeo reaproveitado do cache.")
         for step in (Step.VIDEO_PASS1, Step.VIDEO_PASS2):
             begin(step, number)(1.0)
         pass2 = cached
     else:
         pass2 = _encode_video(plan, number, source, job_dir, tools, begin, checkpoint)
         if cache is not None:
-            _keep(plan, number, key, m2v, pass2, job_dir, cache)
+            keep(plan, number, key, m2v, pass2, job_dir, cache)
     return _finish_title(plan, number, source, media_dir, job_dir, tools, begin, pass2)
 
 
@@ -365,7 +384,7 @@ def _encode_video(
     pass2 = RunResult({}, "")
     for pass_number, step in ((1, Step.VIDEO_PASS1), (2, Step.VIDEO_PASS2)):
         progress = begin(step, number)
-        with _tool_step(step):
+        with tool_step(step):
             pass2 = tools.run(
                 video_pass_command(plan, number, source, job_dir, 1 if pass_number == 1 else 2),
                 duration=title.duration, on_progress=progress,
@@ -392,7 +411,7 @@ def _copy_video(
     """The video of a DVD rip as it is, checked against the standard before anything else."""
     m2v = m2v_path(job_dir, number)
     progress = begin(Step.VIDEO_COPY, number)
-    with _tool_step(Step.VIDEO_COPY):
+    with tool_step(Step.VIDEO_COPY):
         run = tools.run(copy_command(source, title.video_index, m2v), duration=title.duration,
                         on_progress=progress)  # fmt: skip
     report = inspect_stream(m2v)
@@ -403,8 +422,8 @@ def _copy_video(
         raise PipelineError(COPY_GREW.format(name=source.name), Step.VIDEO_COPY)
     chapters, dropped = chapters_on_closed_gops(title.chapters, report.gops)
     for chapter in dropped:
-        _note(job_dir, f"Título {number}: capítulo em {chapter} s saiu (sem GOP fechado perto).")
-    return run, chapters, report, _sha256(m2v)
+        note(job_dir, f"Título {number}: capítulo em {chapter} s saiu (sem GOP fechado perto).")
+    return run, chapters, report, sha256(m2v)
 
 
 def _copy_problem(report: StreamReport, aspect: str) -> str | None:
@@ -421,7 +440,7 @@ def _copy_problem(report: StreamReport, aspect: str) -> str | None:
     return None
 
 
-def _sha256(path: Path) -> str:
+def sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as file:
         while chunk := file.read(COPY_CHUNK):
@@ -429,7 +448,7 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _keep(
+def keep(
     plan: DiscPlan, number: int, key: str, m2v: Path, pass2: RunResult, job_dir: Path,
     cache: CacheUse,
 ) -> None:  # fmt: skip
@@ -438,7 +457,7 @@ def _keep(
         jobs_cache.store(cache.work_dir, key, m2v, pass2)
         jobs_cache.evict(cache.work_dir, cache.limit_bytes, plan_keys(plan, cache.ffmpeg))
     except OSError as error:
-        _note(job_dir, f"Título {number}: cache não gravado ({error}).")
+        note(job_dir, f"Título {number}: cache não gravado ({error}).")
 
 
 def _finish_title(
@@ -456,12 +475,12 @@ def _finish_title(
     m2v = m2v_path(job_dir, number)
     progress = begin(Step.AUDIO, number)
     for track, audio in enumerate(title.audio, start=1):
-        with _tool_step(Step.AUDIO):
+        with tool_step(Step.AUDIO):
             tools.run(audio_command(audio, source, audio_path(job_dir, number, track)))
         progress(track / len(title.audio))
     progress = begin(Step.MUX, number)
     movie = mpg_path(job_dir, number)
-    with _tool_step(Step.MUX):
+    with tool_step(Step.MUX):
         first_pts = parse_first_pts(tools.capture(first_pts_command(m2v)))
         mux = tools.run(mux_command(title, job_dir, number, first_pts), duration=title.duration,
                         on_progress=progress)  # fmt: skip
@@ -495,7 +514,7 @@ def _render_menu(plan: DiscPlan, index: int, job_dir: Path, tools: Tools) -> Non
         highlight(boxed, plan.menu.accent, select=True).save(files["lb-select"])
         layouts.append((boxed, files["lb-highlight"], files["lb-select"]))
     current = job_dir / f"menu{index}.still.mpg"
-    with _tool_step(Step.MENUS):
+    with tool_step(Step.MENUS):
         tools.run(menu_video_command(files["background"], plan.menu.aspect, current))
         for stream, (layout, lit, chosen) in enumerate(layouts):
             xml = job_dir / f"menu{index}.{stream}.xml"
@@ -526,7 +545,7 @@ def _title_checks(
         tools.run(extract_video_command(iso, extracted, number))
         report = inspect_stream(extracted)
         if result.source_report is not None:  # copied video
-            same = _sha256(extracted) == result.sha256
+            same = sha256(extracted) == result.sha256
             chapters = result.chapters or title.chapters
             checks += bitstream_checks(report, title.aspect)[:1]
             checks += copied_checks(report, result.source_report, same, chapters)
@@ -570,7 +589,7 @@ def _render_subtitle(
 ) -> None:
     """Draw one SRT as subpicture stream `number` into the title (spumux, stdin to stdout)."""
     srt = job_dir / f"sub{number}.srt"
-    with _tool_step(Step.SUBTITLES):
+    with tool_step(Step.SUBTITLES):
         if subtitle.stream_index is not None:
             tools.run(extract_command(source, subtitle.stream_index, srt))
             name = f"interna {subtitle.stream_index}"
@@ -591,7 +610,7 @@ def _render_subtitle(
     xml_file.write_text(spumux_xml(srt, plan.aspect), encoding="utf-8")
     movie = mpg_path(job_dir, title)
     rendered = movie.with_suffix(".next.mpg")
-    with _tool_step(Step.SUBTITLES):
+    with tool_step(Step.SUBTITLES):
         tools.run(spumux_command(xml_file, number), stdin=movie, stdout=rendered)
     os.replace(rendered, movie)
     srt.unlink()
@@ -632,13 +651,13 @@ def preflight(
     return errors
 
 
-def _note(job_dir: Path, text: str) -> None:
+def note(job_dir: Path, text: str) -> None:
     """A line of the app in the job log, between the tool outputs."""
     with (job_dir / "job.log").open("a", encoding="utf-8") as log:
         log.write(f"[projeto-dvd] {text}\n")
 
 
-def _check_source(source: Path, plan: TitlePlan) -> None:
+def check_source(source: Path, plan: TitlePlan) -> None:
     message = SOURCE_CHANGED.format(name=source.name)
     try:
         stat = source.stat()
@@ -649,18 +668,18 @@ def _check_source(source: Path, plan: TitlePlan) -> None:
 
 
 @contextmanager
-def _tool_step(step: Step) -> Iterator[None]:
+def tool_step(step: Step, label: str | None = None) -> Iterator[None]:
     try:
         yield
     except ToolError as error:
         if "No space left" in error.stderr:
             raise PipelineError(NO_SPACE, step) from error
-        raise PipelineError(f"Falhou na etapa {STEP_LABELS[step]}.", step) from error
+        raise PipelineError(f"Falhou na etapa {label or STEP_LABELS[step]}.", step) from error
     except ValueError as error:  # unreadable tool output (first pts)
-        raise PipelineError(f"Falhou na etapa {STEP_LABELS[step]}.", step) from error
+        raise PipelineError(f"Falhou na etapa {label or STEP_LABELS[step]}.", step) from error
 
 
-def _publish(
+def publish(
     iso: Path,
     output_dir: Path,
     plan: DiscPlan,

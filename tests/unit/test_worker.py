@@ -368,3 +368,22 @@ def test_a_cache_error_before_the_job_does_not_stop_the_worker(
     assert job(engine, job_id).status == "done"
     log = (settings.work_dir / "jobs" / str(job_id) / "job.log").read_text()
     assert "cache não limpo" in log
+
+
+def test_a_blu_ray_job_runs_the_blu_ray_pipeline(
+    engine: Engine, session: Session, settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    job_id = store.enqueue(session, make_movie(profile="bd25", menu=None))
+    dvd = fake_pipeline(monkeypatch, lambda plan, **kw: PipelineResult(iso_path=Path("x"),
+                                                                        qa_json=None))  # fmt: skip
+    blu_ray: list[Any] = []
+
+    def run(plan: Any, **kwargs: Any) -> PipelineResult:
+        blu_ray.append(plan)
+        return PipelineResult(iso_path=settings.output_dir / "iso" / "F (BD).iso", qa_json=None)
+
+    monkeypatch.setattr(worker, "run_bluray", run)
+
+    assert make_worker(engine, settings).run_once() is True
+    assert dvd == [] and len(blu_ray) == 1
+    assert job(engine, job_id).status == "done"

@@ -1,16 +1,16 @@
 {% if dvd.visible %}
 <section class="dvd-block" id="dvd">
   {% if dvd.active %}
-  <p class="banner">Gerando DVD: {{ (dvd.active.progress * 100) | int }}%.
+  <p class="banner">Gerando disco: {{ (dvd.active.progress * 100) | int }}%.
     <a href="{{ url_for('job_page', job_id=dvd.active.id) }}">Ver o job</a></p>
   <p class="actions"><a class="button" href="{{ url_for('cover_page', name=folder.name | urlencode) }}">Capa</a></p>
   {% elif dvd.reasons %}
   <div class="banner banner-warning">
-    <strong>Não dá para montar o DVD desta pasta</strong>
+    <strong>Não dá para montar o disco desta pasta</strong>
     <ul>{% for reason in dvd.reasons %}<li>{{ reason }}</li>{% endfor %}</ul>
   </div>
   {% else %}
-  <p class="actions"><a class="button primary" href="{{ url_for('dvd_form', name=folder.name | urlencode) }}">Montar DVD</a>
+  <p class="actions"><a class="button primary" href="{{ url_for('dvd_form', name=folder.name | urlencode) }}">Montar disco</a>
     <a class="button" href="{{ url_for('cover_page', name=folder.name | urlencode) }}">Capa</a></p>
   {% endif %}
   {% if dvd.last_done %}

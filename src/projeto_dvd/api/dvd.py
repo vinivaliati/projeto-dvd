@@ -13,7 +13,7 @@ from sqlmodel import Session
 from starlette.concurrency import run_in_threadpool
 
 from projeto_dvd.api.deps import FolderDep, MediaDirDep, SessionDep, SettingsDep, templates
-from projeto_dvd.api.formatting import ENCODE_SECONDS_PER_SECOND
+from projeto_dvd.api.formatting import encode_seconds
 from projeto_dvd.config import Settings
 from projeto_dvd.db.models import DiscProject, Job
 from projeto_dvd.jobs import store
@@ -22,10 +22,12 @@ from projeto_dvd.jobs.store import JobStatus
 from projeto_dvd.library.scan import FolderView, Status
 from projeto_dvd.menus.render import preview
 from projeto_dvd.menus.theme import PALETTE, auto_accent, available_backdrops
+from projeto_dvd.planner.bd_source import bd_copy_reason
 from projeto_dvd.planner.calculator import Estimate, suggest_profile
 from projeto_dvd.planner.disc import (
     DiscTitle,
     audio_languages,
+    bd_eligible,
     copy_reason,
     is_rip,
     menu_name,
@@ -41,6 +43,7 @@ from projeto_dvd.planner.disc_build import (
     disc_errors,
     disc_estimate,
     disc_estimates,
+    hd_disc,
     menu_plan,
 )
 from projeto_dvd.planner.disc_plan import DiscChoices, MenuPlan
@@ -51,15 +54,17 @@ from projeto_dvd.planner.disc_source import (
     load_disc,
     prepare_title,
     run_capture,
+    run_trace,
     suggestion,
     theme_image,
 )
 from projeto_dvd.planner.languages import language_name
-from projeto_dvd.planner.profiles import PROFILES
+from projeto_dvd.planner.profiles import PROFILES, medium_of
 from projeto_dvd.planner.source import check_video
 
 router = APIRouter()
 INVALID_FORM = "Formulário inválido. Recarregue a página."
+BD_COPIED = "vídeo copiado do Blu-ray (conferido ao gerar)"
 # Frame scans of MPEG-2 rips, by (path, size, mtime_ns): only "Gerar" runs them.
 _frames: dict[tuple[str, int, int], str] = {}
 
@@ -118,7 +123,10 @@ def parse_disc_form(form: Mapping[str, list[str]], disc: Disc) -> DiscChoices | 
     if first in audio:
         audio.remove(first)
         audio.insert(0, first)
-    subtitles = [lang for lang in subtitle_languages(disc.titles)
+    medium = PROFILES[one("profile")].medium if one("profile") in PROFILES else "dvd"
+    if medium == "bluray" and bd_eligible(disc.titles) is not None:
+        return None  # a page from before the folder changed
+    subtitles = [lang for lang in subtitle_languages(disc.titles, medium)
                  if lang in form.get("subtitle", []) or lang == on]  # fmt: skip
     backdrop = one("backdrop") or None
     fields = {
@@ -180,8 +188,12 @@ async def dvd_choices(
     session.add(project)
     session.commit()
     page = _page(form.get("preview_page", ["0"])[0])
-    return _render(request, "_disc_results.html", settings, disc, choices, errors=[],
-                   preview_page=page, titles_changed=choices.order != before.order)  # fmt: skip
+    response = _render(request, "_disc_results.html", settings, disc, choices, errors=[],
+                       preview_page=page, titles_changed=choices.order != before.order)  # fmt: skip
+    if medium_of(choices.profile) != medium_of(before.profile):
+        # DVD and Blu-ray differ in sections (menu) and subtitle languages: reload the page.
+        response.headers["HX-Refresh"] = "true"
+    return response
 
 
 @router.get("/folders/{name}/dvd/menu.png", name="dvd_menu_preview")
@@ -233,12 +245,14 @@ async def create_dvd(
     sources: list[TitleSource] = []
     if not errors:
         # Up to 2 minutes per DVD rip: off the event loop, so the other pages keep answering.
-        sources, errors = await run_in_threadpool(prepare_titles, disc.titles)
+        sources, errors = await run_in_threadpool(prepare_titles, disc.titles, choices)
     if not errors:
-        menu = disc_menu(choices, disc.titles, name, settings.output_dir)
+        dvd = medium_of(choices.profile) == "dvd"
+        menu = disc_menu(choices, disc.titles, name, settings.output_dir) if dvd else None
         plan = build_disc_plan(name, sources, choices, menu, confirm_low, replace_iso)
         # The frame sample may recode a rip the page planned as a copy: check the real plan.
-        final = disc_estimate(PROFILES[choices.profile], plan.titles, len(menu.pages))
+        final = disc_estimate(PROFILES[choices.profile], plan.titles,
+                              len(menu.pages) if menu else 0)  # fmt: skip
         errors = disc_errors(choices, disc.titles, final, confirm_low)
     if not errors:
         errors = preflight(settings.work_dir, settings.output_dir, plan.estimated_bytes,
@@ -254,12 +268,20 @@ async def create_dvd(
     return _redirect(request, "job_page", job_id=job_id)
 
 
-def prepare_titles(titles: Sequence[DiscTitle]) -> tuple[list[TitleSource], list[str]]:
-    """The video mode of each title (the frame scan of DVD rips), or why it cannot go on."""
+def prepare_titles(
+    titles: Sequence[DiscTitle], choices: DiscChoices
+) -> tuple[list[TitleSource], list[str]]:
+    """The video mode of each title (the frame scan of DVD rips), or why it cannot go on.
+
+    A Blu-ray title that may be copied also samples its headers and GOPs.
+    """
+    medium = medium_of(choices.profile)
     sources: list[TitleSource] = []
     errors: list[str] = []
     for title in titles:
-        source = prepare_title(title, _cached_capture(title))
+        copy = medium == "bluray" and bd_copy_reason(title, choices, None, None) is None
+        trace = run_trace if copy else None
+        source = prepare_title(title, _cached_capture(title), medium, trace)
         if isinstance(source, tuple):
             errors += [f"{title.path.split('/', 1)[1]}: {reason}" for reason in source]
         else:
@@ -322,6 +344,7 @@ def _render(
     replace_iso: bool = False,
 ) -> HTMLResponse:
     estimates = disc_estimates(choices, disc.titles, disc.name)
+    medium = medium_of(choices.profile)
     path, image = theme_image(choices, disc.name, settings.output_dir)
     menu = menu_plan(choices, disc.titles, disc.name, path, image)
     by_path = {t.path: t for t in disc.titles}
@@ -334,9 +357,10 @@ def _render(
         "badges": [missing_languages(title, choices) for title in ordered],
         "copy_notes": [_copy_note(title, choices) for title in ordered],
         "audio_languages": audio_languages(disc.titles),
-        "subtitle_languages": subtitle_languages(disc.titles), "language_name": language_name,
+        "subtitle_languages": subtitle_languages(disc.titles, medium),
+        "language_name": language_name, "medium": medium, "bd_reason": bd_eligible(disc.titles),
         "estimates": estimates, "chosen": _chosen(estimates, choices),
-        "suggested": suggest_profile(estimates).key, "menu": menu,
+        "suggested": suggest_profile(estimates, hd_disc(disc.titles)).key, "menu": menu,
         "page_names": _page_names(menu), "preview_page": min(preview_page, len(menu.pages) - 1),
         "version": hashlib.sha1(choices.model_dump_json().encode()).hexdigest()[:12],
         "palette": PALETTE, "auto_key": auto_accent(image), "titles_changed": titles_changed,
@@ -344,8 +368,10 @@ def _render(
         "confirm_low": confirm_low, "replace_iso": replace_iso,
         "frame_scan": any(check_video(t.summary).needs_frame_scan for t in disc.titles),
         "encode_seconds": sum(
-            (t.summary.duration or 0.0)
-            * ENCODE_SECONDS_PER_SECOND[bool(t.summary.video and t.summary.video.height > 576)]
+            encode_seconds(
+                t.summary.duration or 0.0, bool(t.summary.video and t.summary.video.height > 576),
+                medium, medium == "bluray" and bd_copy_reason(t, choices, None, None) is None,
+            )
             for t in disc.titles
         ),
     }  # fmt: skip
@@ -353,7 +379,10 @@ def _render(
 
 
 def _copy_note(title: DiscTitle, choices: DiscChoices) -> str | None:
-    """What happens to the video of a DVD rip; None for anything else."""
+    """What happens to the video of a DVD rip, or of any title on a Blu-ray; None otherwise."""
+    if medium_of(choices.profile) == "bluray":
+        reason = bd_copy_reason(title, choices, None, None)
+        return BD_COPIED if reason is None else f"recodificado: {reason}"
     if not is_rip(title):
         return None
     reason = copy_reason(title, choices)

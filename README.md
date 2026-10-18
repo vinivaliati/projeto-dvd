@@ -11,11 +11,12 @@ The goal is a physical collection meant to last: discs that follow the official 
 BDMV specifications closely enough to play on an ordinary player 20 years from now, with menus
 simple enough for a child or a grandparent to use with just the remote.
 
-> **Status:** Phase 5 (printable cover and disc labels) on top of the DVD with menus of
-> Phases 4a and 4b. Each video of a disc folder is matched with TMDB (movie or episode, pt-BR
-> data and art), the whole folder becomes a DVD-Video ISO with menus, checked automatically,
-> and the **Capa** page prints the case insert and two round labels on A4. See the roadmap in
-> [`CLAUDE.md`](CLAUDE.md) (in Portuguese).
+> **Status:** Phase 6a (a Blu-ray of one movie, without menus) on top of the DVD with menus
+> of Phases 4a and 4b and the printable cover of Phase 5. Each video of a disc folder is
+> matched with TMDB (movie or episode, pt-BR data and art); the whole folder becomes a
+> DVD-Video ISO with menus, or one HD movie becomes a BD-25/BD-50 ISO, both checked
+> automatically; the **Capa** page prints the case insert and two round labels on A4. See the
+> roadmap in [`CLAUDE.md`](CLAUDE.md) (in Portuguese).
 
 ## Planned pipeline
 
@@ -76,7 +77,7 @@ app finds it on [TMDB](https://www.themoviedb.org/) and the Vini confirms it.
    `logo.png` and `metadata.json` (episodes: `S01E03.jpg` and `S01E03.json` in the series
    folder). Choosing among several images comes with the covers.
 
-The "Montar DVD" page then uses the TMDB names in the menu, the backdrop as the menu art and
+The "Montar disco" page then uses the TMDB names in the menu, the backdrop as the menu art and
 the original language to suggest the audio.
 
 <img src="src/projeto_dvd/web/static/tmdb.svg" alt="TMDB" height="14">
@@ -89,7 +90,7 @@ are used for personal, non-commercial purposes (printing covers of one's own col
 
 1. Put the videos of one disc in a folder (three movies, or the episodes of a season), open the
    folder in the app and click **Escanear**.
-2. Click **Montar DVD**. The page already suggests everything and saves each change:
+2. Click **Montar disco**. The page already suggests everything and saves each change:
    - **Titles:** movies or a series, in the order of the disc (move them up and down). Names
      come from TMDB when the match is confirmed, or from the file name.
    - **Languages, for the whole disc:** audio and subtitle languages, which audio plays first
@@ -159,10 +160,35 @@ The work folder needs about **three times the disc size** free with the cache on
 for a DVD-9; twice without it): each intermediate file is deleted as soon as the next step
 succeeds, and **Apagar arquivos temporários** on the job page removes what is left.
 
+## Building a Blu-ray
+
+A folder with **one HD movie** (1080p or 720p, 23.976 fps, SDR) also offers **BD-25** and
+**BD-50** on the same page, and an HD movie suggests the Blu-ray first. The disc has no menu
+yet: it starts by itself, and the chapters skip through the movie. Several titles per Blu-ray
+and the menus wait for a spike (Phase 6b): tsMuxeR joins titles without realigning audio or
+subtitles, so a joined disc needs work that a disc with menus may not use.
+
+- **Video:** a Blu-ray remux (H.264 High up to level 4.1, 1920x1080 or 1440x1080, with the
+  HRD, the 4 slices and the 1-second GOPs of a real Blu-ray, checked on the first seconds with
+  `trace_headers`) is **copied byte for byte**. Anything else is encoded by x264 in Blu-ray
+  mode (2 passes, `bluray-compat`, level 4.1, closed GOPs, always 8-bit), padded to the full
+  frame; WEB-DL files are encoded even though tsMuxeR would take them silently.
+- **Audio:** AC-3, DTS, DTS-HD MA and LPCM are copied (lossless stays lossless); TrueHD,
+  E-AC-3, AAC and the rest become AC-3 640k. tsMuxeR ignores the delay of a MKV track, so each
+  track is written already aligned (LPCM padded with silence, a late AC-3 or DTS converted).
+- **Subtitles:** PGS tracks are copied; `.srt` and MKV text tracks become PGS.
+- **QA:** the ISO is read through **libbluray** and **libudfread** (the libraries VLC plays
+  discs with, via ctypes, without mounting it): BDMV tree, First Playback, playlist duration,
+  chapters, every track and its language, each audio track lasting the whole movie, a full
+  decode, and the H.264 on the disc identical to what tsMuxeR received. The job also fails when
+  tsMuxeR prints a warning, since it exits with 0 on discs it knows are broken.
+- Burn the ISO as an image (ImgBurn "Write image file" or Windows "Burn disc image"); do not
+  format the BD-R with spare areas. The first disc should be tested on a real player.
+
 ## Printing the cover
 
 The **Capa** button of a folder opens the cover of the disc it builds (it reads what the
-Montar DVD page saved: titles, languages, backdrop and accent color).
+Montar disco page saved: titles, languages, backdrop and accent color).
 
 ![A cover insert: back, spine and front on an A4 sheet](docs/images/cover-preview.png)
 
@@ -189,7 +215,8 @@ Montar DVD page saved: titles, languages, backdrop and accent color).
 - httpx2 for the TMDB API (and its `MockTransport` in the tests: they never call TMDB)
 - Pillow for the menu pages, the covers and their PDF
 - SQLite (WAL) with SQLModel and Alembic; a separate worker process runs the jobs
-- Media toolchain: ffmpeg, dvdauthor/spumux, genisoimage, tsMuxeR, xorriso
+- Media toolchain: ffmpeg (libx264), dvdauthor/spumux, genisoimage, tsMuxeR, libbluray and
+  libudfread (ctypes), xorriso
 - Docker and docker compose; GitHub Actions CI
 - uv, ruff, mypy (strict), pytest
 

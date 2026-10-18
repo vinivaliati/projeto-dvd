@@ -6,8 +6,6 @@ from enum import StrEnum
 
 from projeto_dvd.planner.profiles import DiscProfile
 
-PACK_OVERHEAD_KBPS = 300  # pack, PES and nav headers inside the 10.08 Mbps mux
-SUBTITLE_PEAK_KBPS = 40
 SUBTITLE_AVERAGE_KBPS = 10
 # A target equal to maxrate turns the 2-pass VBR into CBR (no room for the hard scenes).
 VBR_HEADROOM = 0.95
@@ -46,8 +44,8 @@ def maxrate_kbps(profile: DiscProfile, audio_kbps: Sequence[int], subtitles: int
     room = (
         profile.mux_rate_kbps
         - sum(audio_kbps)
-        - SUBTITLE_PEAK_KBPS * subtitles
-        - PACK_OVERHEAD_KBPS
+        - profile.subtitle_peak_kbps * subtitles
+        - profile.pack_overhead_kbps
     )
     return min(profile.max_video_kbps, room)
 
@@ -97,8 +95,15 @@ def menu_bytes(pages: int) -> int:
     return max(pages, MENU_RESERVE_PAGES) * MENU_PAGE_BYTES if pages else 0
 
 
-def suggest_profile(estimates: Sequence[Estimate]) -> DiscProfile:
-    """The first profile with great quality; the last one (the largest) otherwise."""
+def suggest_profile(estimates: Sequence[Estimate], hd: bool = False) -> DiscProfile:
+    """The first profile with great quality; the last one (the largest) otherwise.
+
+    An HD source looks only at the Blu-ray profiles, when there are any: a great DVD of a
+    1080p movie is still 480 lines.
+    """
+    blu_ray = [item for item in estimates if item.profile.medium == "bluray"]
+    if hd and blu_ray:
+        estimates = blu_ray
     for item in estimates:
         if item.quality == Quality.GREAT:
             return item.profile

@@ -276,11 +276,36 @@ validado com teste antes de virar padrão.
   com "no video format specified for VMGM".
 
 ### 5.2 Blu-ray (BDMV)
-- Vídeo: H.264 1080p 23,976 fps, com x264 em modo de compatibilidade Blu-ray (`--bluray-compat`,
-  level 4.1, GOP e VBV dentro do padrão, slices). Parâmetros exatos a confirmar e testar.
-- Origem em HDR/4K: converter para SDR 1080p (tonemapping), porque o BDMV comum não aceita HDR.
-- Áudio: AC-3 até 640 kbps, DTS ou LPCM. Copiar sem recodificar quando a origem for compatível.
-- Legendas: PGS. O `tsMuxeR` converte SRT para PGS.
+- Fase 6a (feito, testado na imagem): **um título por disco, sem menu**; origem 1080p ou 720p,
+  23,976 progressivo, SDR (SD vai para o DVD; 4K/HDR recusados até uma fase de tonemap).
+- Vídeo **copiado** de um remux de Blu-ray: H.264 High/Main até level 4.1, 8 bits,
+  1920x1080 SAR 1:1 ou 1440x1080 SAR 4:3, HRD presente, 4 slices ou mais, DPB até 4 (lidos com
+  `-bsf:v trace_headers`) e GOP até 24 quadros. Extraído em Annex B (`h264_mp4toannexb`); o
+  tsMuxeR recebe `.h264` sem `insertSEI` e sem `contSPS`. WEB-DL recodifica (o tsMuxeR aceita
+  calado um H.264 sem HRD e com 1 slice).
+- Vídeo **codificado** (`encode/x264.py`): `-preset slow -profile:v high -level 4.1 -pix_fmt
+  yuv420p -b:v <alvo> -maxrate <max> -bufsize 30000k -x264-params bluray-compat=1:keyint=24:
+  min-keyint=1:slices=4:b-pyramid=strict:open-gop=0:nal-hrd=vbr:aud=1:colorprim=bt709:
+  transfer=bt709:colormatrix=bt709 -r 24000/1001 -fps_mode cfr -f h264`; VBV só no
+  `-maxrate/-bufsize` (repetido no `-x264-params` briga); quadro menor ganha `pad` até 1920x1080
+  ou 1280x720; 1440x1080 recodificado é escalado.
+- Áudio: copia AC-3 até 640k, DTS core, DTS-HD MA/HRA e LPCM 16/24 a 48 kHz; o resto (TrueHD sem
+  núcleo, E-AC-3, AAC...) vira AC-3 (640k de 3 a 6 canais, 256k estéreo, 128k mono). O tsMuxeR
+  ignora o atraso do MKV: cada faixa é extraída alinhada (LPCM com silêncio; AC-3/DTS atrasado
+  mais de 1 quadro é convertido com `adelay`). LPCM vai em `.mka` (`track=1`): um WAV não passa
+  de 4 GiB, e um 5.1 de 24 bits chega lá em 83 minutos (testado na imagem).
+- Legendas: PGS copiado (`.sup`); SRT e texto do MKV como `S_TEXT/UTF8` (DejaVu Sans 58, borda 4,
+  108 de margem em 1080p), em UTF-8 sem BOM e **terminado em linha em branco** (sem ela o
+  tsMuxeR descarta a última legenda).
+- `--label` em ASCII até 30 caracteres; idiomas em ISO 639-2 bibliográfico; `default` no áudio
+  que toca primeiro e `default=all` na legenda ligada. O job reprova se o tsMuxeR escrever
+  `Warning`, `bad frame`, `Invalid` ou `Can't` (ele sai com 0 em disco quebrado).
+- QA pela libbluray e pela libudfread (ctypes, `authoring/bluray/libs.py`): árvore BDMV (o
+  `CERTIFICATE` sai vazio sem AACS/BD-J), First Playback, duração (±0,5 s), capítulos, faixas e
+  idiomas, cobertura de cada áudio, decodificação completa e o H.264 idêntico ao entregue.
+- Vários títulos por disco com o `+` do tsMuxeR: **não usar sem conformar** (testado na revisão:
+  formatos diferentes saem com código 0 e faixa cortada, a resolução do último arquivo vale para
+  todos, o áudio não é realinhado entre títulos e o PGS do 2º título não é deslocado).
 - Estrutura: `tsMuxeR` gera BDMV/CERTIFICATE e também o próprio `.iso` em UDF 2.5x (o `xorriso`
   não faz UDF 2.50). Verificado na Fase 0 com o tsMuxeR 2.7.0.
 - **Menus de Blu-ray: principal risco do projeto.** Não existe ferramenta aberta madura. A Fase 6
@@ -368,7 +393,7 @@ src/projeto_dvd/
   encode/         # comandos ffmpeg por perfil (funções puras); mpeg2.py: soft pulldown e leitura
   authoring/
     dvd/          # mux, menus (MPEG-2 parado, spumux), dvdauthor XML, QA automática do ISO
-    bluray/       # tsMuxeR meta, (menus após o spike)
+    bluray/       # meta do tsMuxeR, libbluray/libudfread (ctypes) e QA do ISO
   menus/          # páginas (pages), paleta e fundos (theme), geometria (layout), Pillow (render)
   covers/         # medidas (sizes), conteúdo, opções de arte, layout em mm, render e PDF
   jobs/           # runner de processos, pipeline, fila (store), worker, arquivos do job
@@ -535,7 +560,10 @@ não mudam; a Fase 3 vem antes da 2 para ter um disco de verdade o quanto antes.
         Implementada; falta conferir com os rips reais do Vini (QA no final do projeto).
 - [ ] **Fase 5: Capas.** Composição frente/lombada/verso, label, PDF. Implementada; falta
       imprimir uma de teste com a caixa e as etiquetas compradas.
-- [ ] **Fase 6: Blu-ray.** BDMV sem menu com perfil BD-25/BD-50 + spike de menus e decisão.
+- [ ] **Fase 6: Blu-ray.** Dividida em duas entregas (2026-10-17):
+  - [ ] **6a: um título por Blu-ray, sem menu** (BD-25/BD-50, cópia de remux, x264, QA pela
+        libbluray). Implementada; falta o teste num player físico.
+  - [ ] **6b: spike de menus** e decisão; depois, vários títulos por Blu-ray.
 - [ ] **Fase 7: Boxes.** Conjuntos de discos com perfis independentes, tema unificado, lombadas
       contínuas, assistente para dividir série.
 - [ ] **Fase 8: Polimento.** Menus com vídeo/música, README final com screenshots, demo.
@@ -547,7 +575,11 @@ não mudam; a Fase 3 vem antes da 2 para ter um disco de verdade o quanto antes.
 - **Gravador e mídia:** o Vini ainda vai comprar. Recomendação: gravador de **Blu-ray**, que grava
   DVD também. Para durabilidade, avaliar mídia **M-DISC** (existe em DVD e BD). A segunda etapa
   do pronto da Fase 3 (teste num player físico) depende dessa compra.
-- **Menus de Blu-ray:** resolver no spike da Fase 6.
+- **Menus de Blu-ray:** resolver no spike da Fase 6b; com ele, a estrutura de vários títulos
+  por Blu-ray (uma playlist por título ou um fluxo juntado e conformado).
+- **Blu-ray no player físico** (Fase 6a): as teclas Menu/Title num disco sem menu, o GOP aberto
+  de um remux copiado, a legenda ligada pelo `SetStream`; DTS-HD MA copiado com um trecho real
+  do Vini (o ffmpeg não gera DTS-HD); calibrar o tempo do x264 (×1,0) e a sobrecarga de 6%.
 - **Soft pulldown no DVD:** resolvido no VLC e no ffprobe (patcher próprio, Fase 3). Falta
   confirmar no **player físico**: o `time_code` do GOP na escala de 24p, o `subtitle=64` que liga
   a legenda e a suavidade do pulldown.
@@ -631,6 +663,13 @@ _Atualizar ao fim de cada sessão._
   duas etiquetas redondas em A4, grade com as artes do TMDB, textos editáveis e PDF em
   `OUTPUT_DIR/print/`. `make lint`, `make test` (100%) e `make test-slow` (28) verdes. Falta imprimir
   uma de teste com o material comprado.
+- 2026-10-17: PR #8 (Fase 5) mergeado em `main`.
+- 2026-10-18: **Fase 6a implementada** na branch `feat/fase-6a-bluray` (spec e plano em
+  `docs/plans/2026-10-17-fase-6a-bluray*.md`, spec revisada por `tech-lead-midia`, com testes
+  reais do x264, do tsMuxeR e da libbluray, e `revisor-codigo`). Uma pasta com um filme HD vira
+  um Blu-ray sem menu (BD-25/BD-50): perfis na calculadora, sugestão de Blu-ray para origem HD,
+  cópia de remux, x264 em modo Blu-ray, áudio sem perda copiado, PGS, QA pela libbluray. `make
+  lint`, `make test` (100%) e `make test-slow` (36) verdes. Falta o player físico.
 - Os agentes de `.claude/agents/` só são reconhecidos pelo nome a partir de uma sessão nova; na
   sessão em que foram criados, rodam como agente genérico lendo o próprio arquivo.
 
@@ -797,3 +836,15 @@ _Atualizar ao fim de cada sessão._
   recebe o nome por cima.
 - 2026-10-17 (Fase 5): o aviso "Imprima em tamanho real" foi para o pé da folha (no alto cruzava
   as marcas de dobra); o furo da etiqueta é pintado de branco no centro exato, com 1 px de folga.
+- 2026-10-17 (Fase 6): dividida em 6a (Blu-ray sem menu) e 6b (spike de menus). Depois da
+  revisão do `tech-lead-midia`, a 6a ficou com **um título por disco** (decisão do Vini): juntar
+  títulos pelo `+` do tsMuxeR exige conformar áudio, legendas e resolução, e pode não ser a
+  estrutura de um disco com menu.
+- 2026-10-18 (Fase 6a): o meio sai do perfil (`PROFILES[key].medium`), sem campo novo no plano
+  nem migração; perfis BD com sobrecarga de 6% (medida), vídeo até 35 Mbps, PGS a 500 kbps de
+  pico; origem HD sugere Blu-ray; trocar o meio na tela recarrega a página.
+- 2026-10-18 (Fase 6a): cópia do vídeo só de remux de Blu-ray de verdade (HRD, 4 slices, GOP de
+  1 s, level 4.1); x264 com GOP fechado e 8 bits sempre; áudio alinhado na extração; job e QA
+  próprios (`jobs/bluray.py`), reaproveitando runner, cache (`.h264` ao lado do `.m2v`),
+  retomar e publicação; QA por ctypes na libbluray e libudfread (fora da cobertura unitária,
+  coberta pelos `slow`).

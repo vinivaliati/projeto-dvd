@@ -7,18 +7,23 @@ from PIL import Image
 
 from projeto_dvd.library.files import ExternalSubtitle
 from projeto_dvd.menus.theme import PALETTE
+from projeto_dvd.planner.bd_source import HeaderReport
 from projeto_dvd.planner.calculator import Quality, menu_bytes
+from projeto_dvd.planner.disc import BD_ONE_TITLE, bd_eligible, reconcile
 from projeto_dvd.planner.disc_build import (
     TitleSource,
     build_disc_plan,
     disc_errors,
     disc_estimate,
+    disc_estimates,
     menu_plan,
+    profile_for,
     title_plan,
 )
 from projeto_dvd.planner.disc_plan import Theme
+from projeto_dvd.planner.dvd_plan import bd_volume_label, iso_name
 from projeto_dvd.planner.profiles import DVD5, DVD9
-from projeto_dvd.planner.source import VideoMode
+from projeto_dvd.planner.source import BD_SD, VideoMode
 from tests.unit.test_disc import VIDEO, audio, choices, episode, movie, sub, title
 
 
@@ -202,3 +207,131 @@ def test_the_estimate_counts_the_copied_size() -> None:
 
     assert disc_estimate(DVD9, [copied], 1).video_kbps == 0
     assert disc_estimate(DVD9, [recoded], 1).video_kbps > 0
+
+
+# Blu-ray (Phase 6a)
+
+BD_REMUX = {**VIDEO, "profile": "High", "level": 41, "pix_fmt": "yuv420p",
+            "sample_aspect_ratio": "1:1", "tags": {"NUMBER_OF_BYTES": "20000000000"}}  # fmt: skip
+GOOD = HeaderReport(hrd=True, slices=4, max_dec_frame_buffering=4)
+
+
+def bd_source(video: dict[str, Any] = BD_REMUX, tracks: list[dict[str, Any]] | None = None,
+              headers: HeaderReport | None = GOOD, **kwargs: Any) -> TitleSource:  # fmt: skip
+    found = title("P/a.mkv", tracks or [audio(1, "por", bit_rate="640000")],
+                  video_stream=video, **kwargs)  # fmt: skip
+    found = replace(found, video=replace(found.video, size=25_000_000_000))
+    return TitleSource(found, VideoMode.FILM, True, headers=headers, gop_frames=24)
+
+
+def test_a_blu_ray_remux_is_planned_as_copied() -> None:
+    plan = title_plan(bd_source(), choices(profile="bd50"), "A")
+
+    assert plan.copy_video and plan.video_bytes == 20_000_000_000
+    assert (plan.width, plan.height, plan.scale) == (1920, 1080, False)
+    assert [(a.action, a.kbps, a.codec) for a in plan.audio] == [("copy", 640, "ac3")]
+
+
+def test_a_web_file_is_encoded_with_the_frame_padded() -> None:
+    web = {**VIDEO, "height": 800}
+    plan = title_plan(bd_source(web, headers=replace(GOOD, hrd=False)), choices(profile="bd25"),
+                      "A")  # fmt: skip
+
+    assert not plan.copy_video
+    assert (plan.width, plan.height, plan.scale) == (1920, 1080, False)
+
+
+def test_an_anamorphic_1440_is_scaled_only_when_encoded() -> None:
+    anamorphic = {**BD_REMUX, "width": 1440, "sample_aspect_ratio": "4:3"}
+
+    copied = title_plan(bd_source(anamorphic), choices(profile="bd25"), "A")
+    encoded = title_plan(bd_source(anamorphic), choices(profile="bd25", reencode_rips=True), "A")
+
+    assert copied.copy_video and not copied.scale
+    assert not encoded.copy_video and (encoded.width, encoded.scale) == (1920, True)
+
+
+def test_720p_stays_720p() -> None:
+    plan = title_plan(bd_source({**VIDEO, "width": 1280, "height": 720}), choices(profile="bd25"),
+                      "A")  # fmt: skip
+
+    assert (plan.width, plan.height, plan.copy_video) == (1280, 720, False)
+
+
+def test_delayed_audio_that_cannot_be_padded_becomes_ac3() -> None:
+    late = [audio(1, "por", 6, codec_name="dts", profile="DTS", start_time="0.5"),
+            audio(2, "eng", 2, codec_name="pcm_s24le", start_time="0.5")]  # fmt: skip
+    plan = title_plan(bd_source(tracks=late), choices(profile="bd25", audio=("pt", "en")), "A")
+
+    assert [(a.action, a.kbps, a.offset) for a in plan.audio] == [("ac3", 640, 0.5),
+                                                                   ("copy", 2304, 0.5)]  # fmt: skip
+
+
+def test_pgs_and_text_subtitles_on_blu_ray() -> None:
+    subs = [sub(3, "por", codec="hdmv_pgs_subtitle"), sub(4, "eng")]
+    plan = title_plan(bd_source(subtitles=subs), choices(profile="bd25", subtitles=("pt", "en")),
+                      "A")  # fmt: skip
+
+    assert [(s.key, s.codec) for s in plan.subtitles] == [("s3", "pgs"), ("s4", "text")]
+
+
+def test_blu_ray_chapters_go_past_99() -> None:
+    plan = title_plan(bd_source(chapters=150, duration=9000.0),
+                      choices(profile="bd25", chapters="file"), "A")  # fmt: skip
+
+    assert len(plan.chapters) == 150
+
+
+def test_build_a_blu_ray_plan() -> None:
+    s = bd_source()
+    plan = build_disc_plan("O Senhor dos Anéis", [s], choices(profile="bd50"), None, False, False)
+
+    assert plan.menu is None and plan.maxrate_kbps == 0  # copied: nothing to encode
+    assert (plan.volume, plan.iso_name) == ("O Senhor dos Aneis", "O Senhor dos Anéis (BD).iso")
+    encoded = build_disc_plan("F", [s], choices(profile="bd50", reencode_rips=True), None,
+                              False, False)  # fmt: skip
+    assert encoded.maxrate_kbps == 35_000 and encoded.video_kbps > 15_000
+
+
+@pytest.mark.parametrize(
+    ("folder", "label"),
+    [("O Senhor dos Anéis: A Sociedade do Anel", "O Senhor dos Aneis A Sociedade"),
+     ("ÉÇ!", "EC"), ("!!", "DISC")],
+)  # fmt: skip
+def test_bd_volume_label(folder: str, label: str) -> None:
+    assert bd_volume_label(folder) == label
+
+
+def test_iso_name() -> None:
+    assert (iso_name("Filme", "dvd"), iso_name("Filme", "bluray")) == ("Filme.iso",
+                                                                      "Filme (BD).iso")  # fmt: skip
+
+
+def test_blu_ray_estimates_only_for_one_eligible_video() -> None:
+    one = [bd_source().title]
+    two = [bd_source().title, replace(bd_source().title, path="P/b.mkv")]
+    sd = [title("P/a.mkv", video_stream={**VIDEO, "width": 720, "height": 480})]
+
+    keys = [e.profile.key for e in disc_estimates(choices(), one, "P")]
+    assert keys == ["dvd5", "dvd9", "bd25", "bd50"]
+    assert bd_eligible(one) is None
+    assert bd_eligible(two) == BD_ONE_TITLE
+    assert bd_eligible(sd) == f"Blu-ray: {BD_SD}"
+    two_choices = choices(order=("P/a.mkv", "P/b.mkv"))
+    assert [e.profile.key for e in disc_estimates(two_choices, two, "P")] == ["dvd5", "dvd9"]
+
+
+def test_an_hd_video_suggests_blu_ray() -> None:
+    assert profile_for([bd_source().title], "P")(choices()) == "bd25"
+    big = {**BD_REMUX, "tags": {"NUMBER_OF_BYTES": "30000000000"}}
+    found = bd_source(big).title
+    found = replace(found, video=replace(found.video, size=40_000_000_000))
+    assert profile_for([found], "P")(choices()) == "bd50"
+
+
+def test_reconcile_leaves_blu_ray_when_the_folder_gets_a_second_video() -> None:
+    two = [bd_source().title, replace(bd_source().title, path="P/b.mkv")]
+    suggestion = choices(order=("P/a.mkv", "P/b.mkv"), profile="dvd9")
+    saved = choices(profile="bd25").model_dump_json()
+
+    assert reconcile(saved, two, suggestion, ()).profile == "dvd9"

@@ -12,11 +12,13 @@ from pydantic import BaseModel, ConfigDict
 from projeto_dvd.library.files import ExternalSubtitle
 from projeto_dvd.library.probe import AudioTrack, Summary
 from projeto_dvd.planner.languages import dvd_language
+from projeto_dvd.planner.profiles import Medium
 
 MAX_CHAPTERS = 99
 MIN_CHAPTER_GAP = 1.0
 COPY_MAX_KBPS = 448
 TEXT_CODECS = frozenset({"subrip", "mov_text", "text"})
+PGS_CODEC = "hdmv_pgs_subtitle"
 PGS = "Legenda em imagem (PGS): ainda não suportada"
 VOBSUB = "Legenda em imagem (VobSub): ainda não suportada"
 ASS = "Legenda ASS/SSA: ainda não suportada"
@@ -51,6 +53,39 @@ def audio_output(track: AudioTrack) -> AudioOutput:
     return AudioOutput("ac3", 1, 96, 1)
 
 
+BD_COPY_AC3_KBPS = 640
+BD_DTS_CORE_KBPS = 1536  # the DTS core at its highest rate, when the file does not say
+BD_LOSSLESS = ("DTS-HD MA", "DTS-HD HRA")
+BD_PCM_BITS = {"pcm_s16le": 16, "pcm_s24le": 24}
+
+
+def bd_audio_output(track: AudioTrack) -> AudioOutput:
+    """Copy what a Blu-ray player decodes (AC-3, DTS, DTS-HD, LPCM); convert the rest to AC-3.
+
+    Lossless tracks count at their PCM rate (channels x bits x 48 kHz): their peaks are far
+    above the average, and the transport stream has to carry the peak.
+    """
+    channels = track.channel_count or 2
+    bit_rate = track.bit_rate or 0
+    if track.sample_rate == 48000:
+        if track.codec == "ac3" and bit_rate <= BD_COPY_AC3_KBPS * 1000 and channels <= 6:
+            return AudioOutput("copy", channels, bit_rate // 1000 or BD_COPY_AC3_KBPS, None)
+        profile = track.profile or "DTS"
+        if track.codec == "dts" and any(name in profile for name in BD_LOSSLESS):
+            return AudioOutput("copy", channels, channels * (track.bits or 24) * 48, None)
+        if track.codec == "dts" and profile in ("DTS", "DTS-ES"):
+            return AudioOutput("copy", channels, bit_rate // 1000 or BD_DTS_CORE_KBPS, None)
+        if track.codec in BD_PCM_BITS:
+            return AudioOutput("copy", channels, channels * BD_PCM_BITS[track.codec] * 48, None)
+    if channels > 6:
+        return AudioOutput("ac3", 6, BD_COPY_AC3_KBPS, 6)
+    if channels >= 3:
+        return AudioOutput("ac3", channels, BD_COPY_AC3_KBPS, None)
+    if channels == 2:
+        return AudioOutput("ac3", 2, 256, 2)
+    return AudioOutput("ac3", 1, 128, 1)
+
+
 @dataclass(frozen=True)
 class SubtitleOption:
     key: str  # "s<stream index>" or "f:<external file name>"
@@ -60,8 +95,9 @@ class SubtitleOption:
     title: str | None
     forced: bool
     default: bool
-    supported: bool
+    supported: bool  # on a DVD
     reason: str | None
+    bd_supported: bool = False  # on a Blu-ray: text and PGS
 
 
 def subtitle_options(
@@ -78,6 +114,7 @@ def subtitle_options(
             default=track.default,
             supported=track.codec in TEXT_CODECS,
             reason=None if track.codec in TEXT_CODECS else _subtitle_reason(track.codec),
+            bd_supported=track.codec in TEXT_CODECS or track.codec == PGS_CODEC,
         )
         for track in summary.subtitles
     ]
@@ -95,6 +132,7 @@ def subtitle_options(
                 default=False,
                 supported=supported,
                 reason=None if supported else _subtitle_reason(suffix),
+                bd_supported=supported,
             )
         )
     return options
@@ -108,11 +146,15 @@ class ChapterPlan:
 
 
 def plan_chapters(
-    source: tuple[float, ...], duration: float, mode: Literal["file", "every"], minutes: int
+    source: tuple[float, ...],
+    duration: float,
+    mode: Literal["file", "every"],
+    minutes: int,
+    max_chapters: int = MAX_CHAPTERS,
 ) -> ChapterPlan:
     if mode == "file" and len(source) >= 2:
         starts = _clean_starts((0.0, *source), duration)
-        if len(starts) <= MAX_CHAPTERS:
+        if len(starts) <= max_chapters:
             return ChapterPlan(starts, None, None)
         used = _smallest_interval(duration, minutes=1)
         note = (
@@ -125,6 +167,19 @@ def plan_chapters(
         return ChapterPlan(_every(duration, used), used, None)
     note = f"Com {minutes} minutos passaria de {MAX_CHAPTERS} capítulos; vão ser {used}."
     return ChapterPlan(_every(duration, used), used, note)
+
+
+def bd_volume_label(folder: str) -> str:
+    """The Blu-ray volume label: plain ASCII up to 30 characters (tsMuxeR cuts UTF-8 at 32
+    bytes, splitting an accented letter)."""
+    plain = unicodedata.normalize("NFKD", folder).encode("ascii", "ignore").decode()
+    label = re.sub(r"\s+", " ", re.sub(r"[^A-Za-z0-9 _-]", " ", plain)).strip()[:30].rstrip()
+    return label or "DISC"
+
+
+def iso_name(folder: str, medium: Medium) -> str:
+    """A Blu-ray of the folder never asks to replace its DVD."""
+    return f"{folder} (BD).iso" if medium == "bluray" else f"{folder}.iso"
 
 
 def volume_name(folder: str) -> str:
@@ -144,6 +199,7 @@ class AudioChoice(BaseModel):
     kbps: int
     downmix: int | None
     offset: float  # audio start minus video start in the source, seconds
+    codec: str = ""  # the source codec ("ac3", "dts", "pcm_s24le"); Phase 6a, for Blu-ray files
 
 
 class SubtitleChoice(BaseModel):
@@ -153,6 +209,7 @@ class SubtitleChoice(BaseModel):
     stream_index: int | None
     file: str | None  # path relative to the input folder
     language: str | None
+    codec: Literal["text", "pgs"] = "text"  # Phase 6a: a PGS is copied to the Blu-ray
 
 
 def _subtitle_reason(codec: str) -> str:

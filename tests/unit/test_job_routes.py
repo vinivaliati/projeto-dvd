@@ -378,7 +378,7 @@ def test_a_copied_title_shows_the_copy_step(client: TestClient) -> None:
 
     text = client.get(f"/jobs/{job_id}").text
 
-    assert "Etapa atual: Título 1 de 2 · Vídeo copiado do DVD" in text
+    assert "Etapa atual: Título 1 de 2 · Vídeo copiado da origem" in text
     assert "Título 1 de 2 · Vídeo: 1ª passada" not in text
 
 
@@ -390,3 +390,13 @@ def test_clean_cache_with_an_active_job_explains(client: TestClient, settings: S
 
     assert response.status_code == 409
     assert "Espere o job terminar" in response.text and 'href="/jobs"' in response.text
+
+
+def test_a_stopped_blu_ray_job_resumes_and_shows_its_own_steps(client: TestClient) -> None:
+    job_id = stopped_job(client, profile="bd25", menu=None)
+
+    page = html.unescape(client.get(f"/jobs/{job_id}").text)
+
+    assert f"/jobs/{job_id}/resume" in page
+    assert "Montando o Blu-ray (tsMuxeR)" in page
+    assert "Desenhando os menus" not in page and "Ajuste de quadros" not in page
