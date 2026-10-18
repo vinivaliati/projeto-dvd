@@ -7,6 +7,7 @@ early track is trimmed. Every track ends with the movie.
 
 from pathlib import Path
 
+from projeto_dvd.authoring.dvd.subtitles import decode_srt
 from projeto_dvd.planner.dvd_plan import BD_PCM_BITS, AudioChoice
 
 SUFFIXES = {"ac3": ".ac3", "dts": ".dts"}
@@ -61,6 +62,5 @@ def srt_command(source: Path, stream_index: int, out: Path) -> list[str]:
 
 def normalize_srt(data: bytes) -> bytes:
     """UTF-8 without BOM, LF, and a blank line at the end: without it tsMuxeR drops the last
-    subtitle (tested)."""
-    text = data.decode("utf-8-sig", errors="replace").replace("\r\n", "\n").replace("\r", "\n")
-    return (text.rstrip("\n") + "\n\n").encode("utf-8")
+    subtitle (tested). The source may be UTF-8, Windows-1252 or UTF-16, as on the DVD."""
+    return (decode_srt(data).rstrip("\n") + "\n\n").encode("utf-8")

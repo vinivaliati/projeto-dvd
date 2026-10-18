@@ -93,3 +93,9 @@ def test_a_converted_5_1_keeps_its_channels() -> None:
     command = audio_es_command(SOURCE, choice("ac3", "eac3", 6, 640), 60.0, Path("/j/a1.ac3"))
 
     assert "-ac" not in command and "-af" not in command
+
+
+def test_a_windows_1252_srt_keeps_its_accents() -> None:
+    raw = "1\r\n00:00:01,000 --> 00:00:02,000\r\nAção\r\n".encode("cp1252")
+
+    assert normalize_srt(raw) == "1\n00:00:01,000 --> 00:00:02,000\nAção\n\n".encode()
