@@ -5,7 +5,7 @@
 - **Status:** desenho aprovado pelo Vini no chat; revisada por `tech-lead-midia` (testes reais
   com ffmpeg 7.1.5, libx264 164, libbluray 1.3, libudfread e tsMuxeR 2.7.0 na imagem) e
   `revisor-codigo`; achados incorporados. Escopo reduzido a **um título por disco** por decisão
-  do Vini depois da revisão (ver "Decisões").
+  do Vini depois da revisão (ver "Decisões"). Spec revisada aprovada pelo Vini.
 - **Divisão da Fase 6:** 6a (esta spec); 6b, spike de menus de Blu-ray com recomendação; depois,
   vários títulos por Blu-ray com a estrutura que o spike indicar.
 
