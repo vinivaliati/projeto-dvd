@@ -22,6 +22,7 @@ from projeto_dvd.jobs.store import JobStatus
 from projeto_dvd.library.scan import FolderView, Status
 from projeto_dvd.menus.render import preview
 from projeto_dvd.menus.theme import PALETTE, auto_accent, available_backdrops
+from projeto_dvd.planner.bd_source import bd_copy_reason
 from projeto_dvd.planner.calculator import Estimate, suggest_profile
 from projeto_dvd.planner.disc import (
     DiscTitle,
@@ -51,11 +52,12 @@ from projeto_dvd.planner.disc_source import (
     load_disc,
     prepare_title,
     run_capture,
+    run_trace,
     suggestion,
     theme_image,
 )
 from projeto_dvd.planner.languages import language_name
-from projeto_dvd.planner.profiles import PROFILES
+from projeto_dvd.planner.profiles import PROFILES, medium_of
 from projeto_dvd.planner.source import check_video
 
 router = APIRouter()
@@ -233,12 +235,14 @@ async def create_dvd(
     sources: list[TitleSource] = []
     if not errors:
         # Up to 2 minutes per DVD rip: off the event loop, so the other pages keep answering.
-        sources, errors = await run_in_threadpool(prepare_titles, disc.titles)
+        sources, errors = await run_in_threadpool(prepare_titles, disc.titles, choices)
     if not errors:
-        menu = disc_menu(choices, disc.titles, name, settings.output_dir)
+        dvd = medium_of(choices.profile) == "dvd"
+        menu = disc_menu(choices, disc.titles, name, settings.output_dir) if dvd else None
         plan = build_disc_plan(name, sources, choices, menu, confirm_low, replace_iso)
         # The frame sample may recode a rip the page planned as a copy: check the real plan.
-        final = disc_estimate(PROFILES[choices.profile], plan.titles, len(menu.pages))
+        final = disc_estimate(PROFILES[choices.profile], plan.titles,
+                              len(menu.pages) if menu else 0)  # fmt: skip
         errors = disc_errors(choices, disc.titles, final, confirm_low)
     if not errors:
         errors = preflight(settings.work_dir, settings.output_dir, plan.estimated_bytes,
@@ -254,12 +258,20 @@ async def create_dvd(
     return _redirect(request, "job_page", job_id=job_id)
 
 
-def prepare_titles(titles: Sequence[DiscTitle]) -> tuple[list[TitleSource], list[str]]:
-    """The video mode of each title (the frame scan of DVD rips), or why it cannot go on."""
+def prepare_titles(
+    titles: Sequence[DiscTitle], choices: DiscChoices
+) -> tuple[list[TitleSource], list[str]]:
+    """The video mode of each title (the frame scan of DVD rips), or why it cannot go on.
+
+    A Blu-ray title that may be copied also samples its headers and GOPs.
+    """
+    medium = medium_of(choices.profile)
     sources: list[TitleSource] = []
     errors: list[str] = []
     for title in titles:
-        source = prepare_title(title, _cached_capture(title))
+        copy = medium == "bluray" and bd_copy_reason(title, choices, None, None) is None
+        trace = run_trace if copy else None
+        source = prepare_title(title, _cached_capture(title), medium, trace)
         if isinstance(source, tuple):
             errors += [f"{title.path.split('/', 1)[1]}: {reason}" for reason in source]
         else:

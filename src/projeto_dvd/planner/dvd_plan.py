@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict
 from projeto_dvd.library.files import ExternalSubtitle
 from projeto_dvd.library.probe import AudioTrack, Summary
 from projeto_dvd.planner.languages import dvd_language
+from projeto_dvd.planner.profiles import Medium
 
 MAX_CHAPTERS = 99
 MIN_CHAPTER_GAP = 1.0
@@ -145,11 +146,15 @@ class ChapterPlan:
 
 
 def plan_chapters(
-    source: tuple[float, ...], duration: float, mode: Literal["file", "every"], minutes: int
+    source: tuple[float, ...],
+    duration: float,
+    mode: Literal["file", "every"],
+    minutes: int,
+    max_chapters: int = MAX_CHAPTERS,
 ) -> ChapterPlan:
     if mode == "file" and len(source) >= 2:
         starts = _clean_starts((0.0, *source), duration)
-        if len(starts) <= MAX_CHAPTERS:
+        if len(starts) <= max_chapters:
             return ChapterPlan(starts, None, None)
         used = _smallest_interval(duration, minutes=1)
         note = (
@@ -162,6 +167,19 @@ def plan_chapters(
         return ChapterPlan(_every(duration, used), used, None)
     note = f"Com {minutes} minutos passaria de {MAX_CHAPTERS} capítulos; vão ser {used}."
     return ChapterPlan(_every(duration, used), used, note)
+
+
+def bd_volume_label(folder: str) -> str:
+    """The Blu-ray volume label: plain ASCII up to 30 characters (tsMuxeR cuts UTF-8 at 32
+    bytes, splitting an accented letter)."""
+    plain = unicodedata.normalize("NFKD", folder).encode("ascii", "ignore").decode()
+    label = re.sub(r"\s+", " ", re.sub(r"[^A-Za-z0-9 _-]", " ", plain)).strip()[:30].rstrip()
+    return label or "DISC"
+
+
+def iso_name(folder: str, medium: Medium) -> str:
+    """A Blu-ray of the folder never asks to replace its DVD."""
+    return f"{folder} (BD).iso" if medium == "bluray" else f"{folder}.iso"
 
 
 def volume_name(folder: str) -> str:
@@ -181,6 +199,7 @@ class AudioChoice(BaseModel):
     kbps: int
     downmix: int | None
     offset: float  # audio start minus video start in the source, seconds
+    codec: str = ""  # the source codec ("ac3", "dts", "pcm_s24le"); Phase 6a, for Blu-ray files
 
 
 class SubtitleChoice(BaseModel):

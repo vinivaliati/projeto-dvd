@@ -24,7 +24,7 @@ from projeto_dvd.planner.dvd_plan import (
 )
 from projeto_dvd.planner.languages import dvd_language, language_name
 from projeto_dvd.planner.profiles import PROFILES, Medium
-from projeto_dvd.planner.source import geometry
+from projeto_dvd.planner.source import check_video, geometry
 
 MAX_TITLES = 60  # each title costs 2 of the 128 commands of the VMGM dispatcher
 MAX_LANGUAGES = 4  # each language page fits in large type
@@ -108,6 +108,17 @@ def suggest_order(titles: Sequence[DiscTitle]) -> tuple[str, ...]:
     else:
         ordered = sorted(titles, key=lambda t: (_year(t), natural_key(t.path)))
     return tuple(t.path for t in ordered)
+
+
+BD_ONE_TITLE = "Blu-ray: um título por disco nesta fase."
+
+
+def bd_eligible(titles: Sequence[DiscTitle]) -> str | None:
+    """Why the folder cannot become a Blu-ray yet; None when it can (one HD film video)."""
+    if len(titles) != 1:
+        return BD_ONE_TITLE
+    reasons = check_video(titles[0].summary, "bluray").reasons
+    return f"Blu-ray: {reasons[0]}" if reasons else None
 
 
 def track_language(tag: str | None) -> str:
@@ -297,6 +308,8 @@ def reconcile(
     kept = [p for p in choices.order if p in paths]
     order = (*kept, *(p for p in suggestion.order if p not in kept))
     profile = choices.profile if choices.profile in PROFILES else suggestion.profile
+    if PROFILES[profile].medium == "bluray" and bd_eligible(titles) is not None:
+        profile = suggestion.profile
     medium = PROFILES[profile].medium
     audio = tuple(lang for lang in choices.audio if lang in audio_languages(titles))
     found = subtitle_languages(titles, medium)
