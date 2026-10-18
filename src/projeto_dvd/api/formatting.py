@@ -4,6 +4,7 @@ from datetime import datetime
 from pathlib import Path
 
 from projeto_dvd.library.probe import AudioTrack, Video
+from projeto_dvd.planner.profiles import Medium
 
 VIDEO_CODECS = {
     "h264": "H.264",
@@ -94,6 +95,18 @@ def input_label(video: Video) -> str:
 # Encode time per second of movie on a 6-core CPU, both passes (measured by the tech lead:
 # ~310 fps for 1080p H.264 sources, SD about twice as fast).
 ENCODE_SECONDS_PER_SECOND = {True: 0.2, False: 0.1}
+
+
+# Blu-ray (Phase 6a, to calibrate with a real movie): x264 slow at 1080p is about real time;
+# a copied remux is only read and written.
+BD_ENCODE_SECONDS_PER_SECOND = 1.0
+BD_COPY_SECONDS_PER_SECOND = 0.02
+
+
+def encode_seconds(duration: float, hd: bool, medium: Medium, copied: bool) -> float:
+    if medium == "bluray":
+        return duration * (BD_COPY_SECONDS_PER_SECOND if copied else BD_ENCODE_SECONDS_PER_SECOND)
+    return duration * ENCODE_SECONDS_PER_SECOND[hd]
 
 
 def format_encode_time(duration: float, hd: bool) -> str:

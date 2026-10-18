@@ -160,7 +160,7 @@ def test_page_shows_the_suggestions_without_saving(client: TestClient) -> None:
     assert 'name="audio" value="en" checked' in text and "Inglês" in text
     assert "/folders/Filme/dvd/menu.png?page=0&v=" in text
     assert "sugerido" in text and "Ótima" in text
-    assert "A geração leva cerca de 24 min" in text
+    assert "A geração leva cerca de 2h00" in text  # HD: Blu-ray suggested, x264 at real time
     assert saved(client) is None
 
 

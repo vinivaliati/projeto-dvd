@@ -13,7 +13,7 @@ from sqlmodel import Session
 from starlette.concurrency import run_in_threadpool
 
 from projeto_dvd.api.deps import FolderDep, MediaDirDep, SessionDep, SettingsDep, templates
-from projeto_dvd.api.formatting import ENCODE_SECONDS_PER_SECOND
+from projeto_dvd.api.formatting import encode_seconds
 from projeto_dvd.config import Settings
 from projeto_dvd.db.models import DiscProject, Job
 from projeto_dvd.jobs import store
@@ -334,6 +334,7 @@ def _render(
     replace_iso: bool = False,
 ) -> HTMLResponse:
     estimates = disc_estimates(choices, disc.titles, disc.name)
+    medium = medium_of(choices.profile)
     path, image = theme_image(choices, disc.name, settings.output_dir)
     menu = menu_plan(choices, disc.titles, disc.name, path, image)
     by_path = {t.path: t for t in disc.titles}
@@ -356,8 +357,10 @@ def _render(
         "confirm_low": confirm_low, "replace_iso": replace_iso,
         "frame_scan": any(check_video(t.summary).needs_frame_scan for t in disc.titles),
         "encode_seconds": sum(
-            (t.summary.duration or 0.0)
-            * ENCODE_SECONDS_PER_SECOND[bool(t.summary.video and t.summary.video.height > 576)]
+            encode_seconds(
+                t.summary.duration or 0.0, bool(t.summary.video and t.summary.video.height > 576),
+                medium, medium == "bluray" and bd_copy_reason(t, choices, None, None) is None,
+            )
             for t in disc.titles
         ),
     }  # fmt: skip

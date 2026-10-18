@@ -21,6 +21,7 @@ from sqlmodel import Session
 from projeto_dvd.config import Settings
 from projeto_dvd.db.session import is_migrated, make_engine
 from projeto_dvd.jobs import cache, store
+from projeto_dvd.jobs.bluray import run_bluray
 from projeto_dvd.jobs.pipeline import (
     CacheUse,
     PipelineError,
@@ -33,6 +34,7 @@ from projeto_dvd.jobs.pipeline import (
 from projeto_dvd.jobs.runner import Canceled, ProcessRunner, Tools
 from projeto_dvd.jobs.store import JobStatus
 from projeto_dvd.planner.disc_plan import DiscPlan
+from projeto_dvd.planner.profiles import medium_of
 from projeto_dvd.tools import detect_versions
 
 RESTARTED = "O worker parou no meio (o WSL ou o PC reiniciou?). Use Retomar."
@@ -89,8 +91,9 @@ class Worker:
                 job_log.write(f"[projeto-dvd] cache não limpo ({error}).\n")
         should_cancel = self._cancel_check(job_id)
         report = self._reporter(job_id, plan)
+        run = run_bluray if medium_of(plan.profile) == "bluray" else run_pipeline
         try:
-            result = run_pipeline(
+            result = run(
                 plan, media_dir=self.settings.media_dir, job_dir=job_dir,
                 output_dir=self.settings.output_dir,
                 tools=self.make_tools(job_dir, should_cancel), report=report,
