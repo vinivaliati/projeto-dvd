@@ -155,6 +155,10 @@ def best_subtitle(title: DiscTitle, language: str, medium: Medium = "dvd") -> Su
     return next((o for o in options if not o.forced), None)
 
 
+def _medium(choices: DiscChoices) -> Medium:
+    return PROFILES[choices.profile].medium if choices.profile in PROFILES else "dvd"
+
+
 def _usable(option: SubtitleOption, medium: Medium) -> bool:
     return option.bd_supported if medium == "bluray" else option.supported
 
@@ -171,8 +175,9 @@ def missing_languages(title: DiscTitle, choices: DiscChoices) -> list[str]:
     """Short badges for the title list: "sem áudio Inglês", "sem legenda Inglês"."""
     audio = [f"sem áudio {language_name(lang)}" for lang in choices.audio
              if best_audio(title, lang) is None]  # fmt: skip
+    medium = _medium(choices)
     subtitles = [f"sem legenda {language_name(lang)}" for lang in choices.subtitles
-                 if best_subtitle(title, lang) is None]  # fmt: skip
+                 if best_subtitle(title, lang, medium) is None]  # fmt: skip
     return audio + subtitles
 
 
@@ -253,10 +258,11 @@ def track_warnings(titles: Sequence[DiscTitle], choices: DiscChoices) -> tuple[s
                     f"{name} não tem áudio em {language_name(language)}: toca em {fallback}."
                 )
         for language in choices.subtitles:
-            if best_subtitle(title, language) is not None:
+            if best_subtitle(title, language, _medium(choices)) is not None:
                 continue
             forced = any(
-                o.supported and o.forced and (o.language or UND) == language for o in title.options
+                _usable(o, _medium(choices)) and o.forced and (o.language or UND) == language
+                for o in title.options
             )
             if forced:
                 warnings.append(

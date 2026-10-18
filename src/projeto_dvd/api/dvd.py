@@ -27,6 +27,7 @@ from projeto_dvd.planner.calculator import Estimate, suggest_profile
 from projeto_dvd.planner.disc import (
     DiscTitle,
     audio_languages,
+    bd_eligible,
     copy_reason,
     is_rip,
     menu_name,
@@ -42,6 +43,7 @@ from projeto_dvd.planner.disc_build import (
     disc_errors,
     disc_estimate,
     disc_estimates,
+    hd_disc,
     menu_plan,
 )
 from projeto_dvd.planner.disc_plan import DiscChoices, MenuPlan
@@ -62,6 +64,7 @@ from projeto_dvd.planner.source import check_video
 
 router = APIRouter()
 INVALID_FORM = "Formulário inválido. Recarregue a página."
+BD_COPIED = "vídeo copiado do Blu-ray (conferido ao gerar)"
 # Frame scans of MPEG-2 rips, by (path, size, mtime_ns): only "Gerar" runs them.
 _frames: dict[tuple[str, int, int], str] = {}
 
@@ -120,7 +123,8 @@ def parse_disc_form(form: Mapping[str, list[str]], disc: Disc) -> DiscChoices | 
     if first in audio:
         audio.remove(first)
         audio.insert(0, first)
-    subtitles = [lang for lang in subtitle_languages(disc.titles)
+    medium = PROFILES[one("profile")].medium if one("profile") in PROFILES else "dvd"
+    subtitles = [lang for lang in subtitle_languages(disc.titles, medium)
                  if lang in form.get("subtitle", []) or lang == on]  # fmt: skip
     backdrop = one("backdrop") or None
     fields = {
@@ -182,8 +186,12 @@ async def dvd_choices(
     session.add(project)
     session.commit()
     page = _page(form.get("preview_page", ["0"])[0])
-    return _render(request, "_disc_results.html", settings, disc, choices, errors=[],
-                   preview_page=page, titles_changed=choices.order != before.order)  # fmt: skip
+    response = _render(request, "_disc_results.html", settings, disc, choices, errors=[],
+                       preview_page=page, titles_changed=choices.order != before.order)  # fmt: skip
+    if medium_of(choices.profile) != medium_of(before.profile):
+        # DVD and Blu-ray differ in sections (menu) and subtitle languages: reload the page.
+        response.headers["HX-Refresh"] = "true"
+    return response
 
 
 @router.get("/folders/{name}/dvd/menu.png", name="dvd_menu_preview")
@@ -347,9 +355,10 @@ def _render(
         "badges": [missing_languages(title, choices) for title in ordered],
         "copy_notes": [_copy_note(title, choices) for title in ordered],
         "audio_languages": audio_languages(disc.titles),
-        "subtitle_languages": subtitle_languages(disc.titles), "language_name": language_name,
+        "subtitle_languages": subtitle_languages(disc.titles, medium),
+        "language_name": language_name, "medium": medium, "bd_reason": bd_eligible(disc.titles),
         "estimates": estimates, "chosen": _chosen(estimates, choices),
-        "suggested": suggest_profile(estimates).key, "menu": menu,
+        "suggested": suggest_profile(estimates, hd_disc(disc.titles)).key, "menu": menu,
         "page_names": _page_names(menu), "preview_page": min(preview_page, len(menu.pages) - 1),
         "version": hashlib.sha1(choices.model_dump_json().encode()).hexdigest()[:12],
         "palette": PALETTE, "auto_key": auto_accent(image), "titles_changed": titles_changed,
@@ -368,7 +377,10 @@ def _render(
 
 
 def _copy_note(title: DiscTitle, choices: DiscChoices) -> str | None:
-    """What happens to the video of a DVD rip; None for anything else."""
+    """What happens to the video of a DVD rip, or of any title on a Blu-ray; None otherwise."""
+    if medium_of(choices.profile) == "bluray":
+        reason = bd_copy_reason(title, choices, None, None)
+        return BD_COPIED if reason is None else f"recodificado: {reason}"
     if not is_rip(title):
         return None
     reason = copy_reason(title, choices)

@@ -250,7 +250,12 @@ def disc_estimates(
 def profile_for(titles: Sequence[DiscTitle], folder: str) -> Callable[[DiscChoices], str]:
     """The suggested profile of a draft: the first one with great quality (a Blu-ray one for
     an HD video that can become a Blu-ray)."""
-    hd = bd_eligible(titles) is None and any(
-        t.summary.video and t.summary.video.height > 576 for t in titles
-    )
+    hd = hd_disc(titles)
     return lambda draft: suggest_profile(disc_estimates(draft, titles, folder), hd).key
+
+
+def hd_disc(titles: Sequence[DiscTitle]) -> bool:
+    """An HD video that can become a Blu-ray: the suggestion looks at the Blu-ray profiles."""
+    return bd_eligible(titles) is None and any(
+        t.summary.video is not None and t.summary.video.height > 576 for t in titles
+    )

@@ -7,7 +7,7 @@
       <strong>{{ names[i] }}</strong>
       <span class="muted">{{ title.path.split("/", 1)[1] }} · {{ title.summary.video | input_label }} · {{ title.summary.duration | duration }}</span>
       {% if labels[i] != names[i] %}<span class="muted">No menu: {{ labels[i] }}</span>{% endif %}
-      {% if copy_notes[i] %}<span class="badge{{ '' if copy_notes[i] == 'vídeo copiado do DVD' else ' badge-warnings' }}">{{ copy_notes[i] }}</span>{% endif %}
+      {% if copy_notes[i] %}<span class="badge{{ '' if copy_notes[i].startswith('vídeo copiado') else ' badge-warnings' }}">{{ copy_notes[i] }}</span>{% endif %}
       {% for badge in badges[i] %}<span class="badge badge-warnings">{{ badge }}</span>{% endfor %}
     </span>
     <span class="move">

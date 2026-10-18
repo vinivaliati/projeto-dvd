@@ -53,6 +53,10 @@ class JobView:
     can_resume: bool
     resume_errors: tuple[str, ...] = ()
 
+    @property
+    def medium(self) -> str:
+        return "Blu-ray" if medium_of(self.plan.profile) == "bluray" else "DVD"
+
 
 def job_view(session: Session, settings: Settings, job: Job, now: datetime) -> JobView:
     assert job.id is not None

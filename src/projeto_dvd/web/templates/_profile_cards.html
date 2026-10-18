@@ -12,13 +12,14 @@
     {% if item.video_kbps %}
     <span class="muted numbers">vídeo a {{ "%.1f" | format(item.video_kbps / 1000) | replace(".", ",") }} Mbps</span>
     {% else %}
-    <span class="muted">vídeo copiado do DVD</span>
+    <span class="muted">vídeo copiado {{ "do DVD" if p.medium == "dvd" else "da origem" }}</span>
     {% endif %}
-    {% if item.quality == "Não cabe" and "vídeo copiado do DVD" in copy_notes %}
-    <span class="muted">Não cabe com o vídeo copiado: marque "Recodificar os rips".</span>
+    {% if item.quality == "Não cabe" and not item.video_kbps %}
+    <span class="muted">Não cabe com o vídeo copiado: marque "Recodificar".</span>
     {% endif %}
     {% if choices.profile == p.key %}<span class="chosen-label">Escolhido</span>{% endif %}
   </label>
   {% endfor %}
-  <p class="muted help-line">A qualidade depende de quanto espaço sobra para a imagem, a mesma em todos os títulos. Ótima a partir de 5 Mbps.{% if suggested == "dvd9" %} A mídia de dupla camada é mais cara.{% endif %}</p>
+  {% if bd_reason %}<p class="muted help-line">{{ bd_reason }}</p>{% endif %}
+  <p class="muted help-line">A qualidade depende de quanto espaço sobra para a imagem, a mesma em todos os títulos. Ótima a partir de {{ "15 Mbps no Blu-ray" if medium == "bluray" else "5 Mbps no DVD" }}.{% if suggested in ("dvd9", "bd50") %} A mídia de dupla camada é mais cara.{% endif %}</p>
 </div>

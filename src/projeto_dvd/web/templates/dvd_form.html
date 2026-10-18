@@ -1,9 +1,9 @@
 {% extends "base.html" %}
-{% block title %}Montar DVD · {{ disc.name }}{% endblock %}
+{% block title %}Montar disco · {{ disc.name }}{% endblock %}
 {% block content %}
 <a class="back" href="{{ url_for('folder', name=disc.name | urlencode) }}">← {{ disc.name }}</a>
-<h1>Montar DVD de <span class="folder-name">{{ disc.name }}</span></h1>
-<p class="muted">{{ ordered | length }} título{{ "s" if ordered | length != 1 }}. Ao colocar o disco, o menu abre; tudo que você muda aqui fica salvo. A geração leva {{ encode_seconds | remaining }}.</p>
+<h1>Montar disco de <span class="folder-name">{{ disc.name }}</span></h1>
+<p class="muted">{{ ordered | length }} título{{ "s" if ordered | length != 1 }}. Ao colocar o disco, {{ 'o filme começa' if medium == 'bluray' else 'o menu abre' }}; tudo que você muda aqui fica salvo. A geração leva {{ encode_seconds | remaining }}.</p>
 {% if frame_scan %}
 <p class="banner">Esta pasta tem rip de DVD: ao clicar em Gerar, o app examina os quadros de cada um, e isso pode levar alguns minutos antes de o job começar.</p>
 {% endif %}
@@ -47,6 +47,9 @@
   </fieldset>
   <fieldset>
     <legend>Menu</legend>
+    {% if medium == "bluray" %}
+    <p class="banner">Sem menu por enquanto: o disco começa sozinho e os capítulos pulam pelo filme.</p>
+    {% else %}
     <div class="menu-grid">
       {% include "_menu_preview.html" %}
       <div class="menu-controls">
@@ -81,6 +84,7 @@
         </div>
       </div>
     </div>
+    {% endif %}
   </fieldset>
   <fieldset>
     <legend>Capítulos</legend>
@@ -95,9 +99,9 @@
   <fieldset>
     <legend>Disco</legend>
     {% include "_profile_cards.html" %}
-    {% if copy_notes | select | list %}
+    {% if (medium == "dvd" and copy_notes | select | list) or choices.reencode_rips or "vídeo copiado do Blu-ray (conferido ao gerar)" in copy_notes %}
     <label class="confirm"><input type="checkbox" name="reencode_rips" value="1"{% if choices.reencode_rips %} checked{% endif %}>
-      Recodificar os rips de DVD (em vez de copiar o vídeo original)</label>
+      {% if medium == "bluray" %}Recodificar o vídeo (em vez de copiar o original){% else %}Recodificar os rips de DVD (em vez de copiar o vídeo original){% endif %}</label>
     {% endif %}
   </fieldset>
 </div>
@@ -106,7 +110,7 @@
   <label class="confirm"><input type="checkbox" name="replace_iso" value="1"{% if replace_iso %} checked{% endif %}>
     Substituir o ISO existente ({{ existing.stat().st_size | size }})</label>
   {% endif %}
-  <p class="actions"><button class="button primary" type="submit">Gerar DVD</button></p>
+  <p class="actions"><button class="button primary" type="submit">Gerar disco</button></p>
 </form>
 {% include "_disc_bar.html" %}
 {% endblock %}
