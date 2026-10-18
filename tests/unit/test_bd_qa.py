@@ -63,6 +63,8 @@ def test_what_the_disc_info_catches() -> None:
     assert failed(info_checks(info(first_play=False), p)) == ["first_play"]
     assert failed(info_checks(info(duration=598.0), p)) == ["duration"]
     assert failed(info_checks(info(duration=600.0 + FRAME / 2), p)) == []
+    # The container duration counts audio a little longer than the video: not a short disc.
+    assert failed(info_checks(info(duration=599.7), p)) == []
     assert failed(info_checks(info(chapters=(0.0,)), p)) == ["chapters"]
     assert failed(info_checks(info(video=(BdStream(0x02, 6, 1, ""),)), p)) == ["video"]
     short = info(audio=(BdStream(0x81, 6, 1, "por"),))

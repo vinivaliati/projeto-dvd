@@ -19,6 +19,8 @@ REQUIRED = (
 )  # fmt: skip
 H264, AC3, LPCM, PG = 0x1B, 0x81, 0x80, 0x90
 DTS_TYPES = frozenset({0x82, 0x85, 0x86})  # core, HRA, MA: the plan does not tell them apart
+# The plan has the container duration, which counts audio a little past the last frame.
+DURATION_SLACK = 0.5
 START_SLACK = 0.1  # seconds an audio track may start after the video
 END_SLACK = 0.5  # and end before it
 
@@ -47,7 +49,7 @@ def info_checks(info: BdInfo, plan: DiscPlan) -> list[Check]:
         Check(name="detected", label="Reconhecido como Blu-ray", ok=info.detected),
         Check(name="first_play", label="Começa sozinho (First Playback)", ok=info.first_play),
         Check(name="duration", label="Duração da playlist igual à do filme",
-              ok=abs(info.duration - title.duration) <= FRAME,
+              ok=abs(info.duration - title.duration) <= DURATION_SLACK,
               detail=f"{info.duration:.3f} s de {title.duration:.3f} s"),
         Check(name="chapters", label="Capítulos", ok=chapters_ok,
               detail=f"{len(info.chapters)} de {len(title.chapters)}"),

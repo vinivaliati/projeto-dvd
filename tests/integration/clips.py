@@ -6,14 +6,17 @@ from pathlib import Path
 from typing import Any
 
 from projeto_dvd.encode.mpeg2 import apply_soft_pulldown
+from projeto_dvd.encode.x264 import X264_PARAMS
 from projeto_dvd.library.files import find_videos
 from projeto_dvd.library.probe import run_ffprobe, summarize
 from projeto_dvd.metadata.filename import guess
+from projeto_dvd.planner.calculator import suggest_profile
 from projeto_dvd.planner.disc import DiscTitle
-from projeto_dvd.planner.disc_build import TitleSource, build_disc_plan, menu_plan
+from projeto_dvd.planner.disc_build import TitleSource, build_disc_plan, disc_estimates, menu_plan
 from projeto_dvd.planner.disc_plan import DiscPlan
-from projeto_dvd.planner.disc_source import prepare_title, run_capture, suggestion
+from projeto_dvd.planner.disc_source import prepare_title, run_capture, run_trace, suggestion
 from projeto_dvd.planner.dvd_plan import subtitle_options
+from projeto_dvd.planner.profiles import PROFILES
 
 
 def ffmpeg(*args: str) -> None:
@@ -74,6 +77,10 @@ def plan_for(media: Path, folder: str, confirm_low: bool = True, **choices: Any)
     """The suggested disc of a folder, with some choices overridden."""
     titles = disc_titles(media, folder)
     chosen = suggestion(titles, folder).model_copy(update=choices)
+    if "profile" not in choices and PROFILES[chosen.profile].medium != "dvd":
+        # An HD clip suggests a Blu-ray now; these tests are about the DVD.
+        dvd = [e for e in disc_estimates(chosen, titles, folder) if e.profile.medium == "dvd"]
+        chosen = chosen.model_copy(update={"profile": suggest_profile(dvd).key})
     sources = [prepare_title(title, run_capture) for title in titles]
     ready = [s for s in sources if isinstance(s, TitleSource)]
     assert len(ready) == len(titles), sources
@@ -204,3 +211,30 @@ def dvd_rip_copyable(path: Path, size_tag: bool, seconds: int = 10) -> Path:
     for leftover in (vob, chapters):
         leftover.unlink()
     return m2v  # kept next to the rip, to compare with the disc
+
+
+def bd_plan_for(media: Path, folder: str, **choices: Any) -> DiscPlan:
+    """The Blu-ray of a one-video folder (BD-25), with the header and GOP samples of Gerar."""
+    titles = disc_titles(media, folder)
+    chosen = suggestion(titles, folder).model_copy(update={"profile": "bd25", **choices})
+    source = prepare_title(titles[0], run_capture, "bluray", run_trace)
+    assert isinstance(source, TitleSource), source
+    return build_disc_plan(folder, [source], chosen, None, confirm_low=True, replace_iso=False)
+
+
+def bd_remux(path: Path, seconds: int = 10, delay: float = 0.0, lpcm: bool = False) -> Path:
+    """A Blu-ray style H.264 (x264 in Blu-ray mode, 1920x1080) with AC-3 640k or LPCM.
+
+    Not ultrafast: it writes Constrained Baseline, which the copy rule rightly refuses."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    audio = ["-c:a", "pcm_s24le"] if lpcm else ["-c:a", "ac3", "-b:a", "640k"]
+    ffmpeg(
+        "-f", "lavfi", "-i", f"testsrc2=s=1920x1080:r=24000/1001:d={seconds}",
+        "-itsoffset", str(delay), "-f", "lavfi",
+        "-i", f"sine=f=440:d={seconds}:sample_rate=48000",
+        "-map", "0:v", "-map", "1:a", "-c:v", "libx264", "-preset", "veryfast",
+        "-profile:v", "high", "-level", "4.1", "-pix_fmt", "yuv420p", "-b:v", "8000k",
+        "-maxrate", "35000k", "-bufsize", "30000k", "-x264-params", X264_PARAMS,
+        *audio, "-ac", "2", "-metadata:s:a:0", "language=por", str(path),
+    )  # fmt: skip
+    return path
