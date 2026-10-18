@@ -11,11 +11,12 @@ O objetivo é uma coleção física feita para durar: discos que seguem as espec
 de DVD-Video e BDMV à risca, para tocar num player comum daqui a 20 anos, com menus simples o
 bastante para uma criança ou um avô usarem só com o controle remoto.
 
-> **Status:** Fase 5 (capa e etiquetas do disco para imprimir) em cima do DVD com menus das
-> Fases 4a e 4b. Cada vídeo de uma pasta de disco recebe o match no TMDB (filme ou episódio,
-> dados e artes em pt-BR), a pasta inteira vira um ISO de DVD-Video com menus, conferido
-> automaticamente, e a tela **Capa** imprime o encarte da caixa e duas etiquetas redondas em
-> A4. O roadmap está no [`CLAUDE.md`](CLAUDE.md).
+> **Status:** Fase 6a (um Blu-ray de um filme, sem menu) em cima do DVD com menus das Fases
+> 4a e 4b e da capa para imprimir da Fase 5. Cada vídeo de uma pasta de disco recebe o match
+> no TMDB (filme ou episódio, dados e artes em pt-BR); a pasta inteira vira um ISO de DVD-Video
+> com menus, ou um filme HD vira um ISO de BD-25/BD-50, os dois conferidos automaticamente; a
+> tela **Capa** imprime o encarte da caixa e duas etiquetas redondas em A4. O roadmap está no
+> [`CLAUDE.md`](CLAUDE.md).
 
 ## Pipeline planejado
 
@@ -77,7 +78,7 @@ app procura no [TMDB](https://www.themoviedb.org/) e o Vini confirma.
    `metadata.json` (episódios: `S01E03.jpg` e `S01E03.json` na pasta da série). A escolha entre
    várias imagens chega com as capas.
 
-A tela "Montar DVD" usa os nomes do TMDB no menu, o fundo como arte do menu e o idioma
+A tela "Montar disco" usa os nomes do TMDB no menu, o fundo como arte do menu e o idioma
 original para sugerir o áudio.
 
 <img src="src/projeto_dvd/web/static/tmdb.svg" alt="TMDB" height="14">
@@ -91,7 +92,7 @@ para fins pessoais e não comerciais (imprimir as capas da própria coleção).
 
 1. Coloque os vídeos de um disco numa pasta (três filmes, ou os episódios de uma temporada),
    abra a pasta no app e clique em **Escanear**.
-2. Clique em **Montar DVD**. A tela já vem com tudo sugerido e salva cada mudança:
+2. Clique em **Montar disco**. A tela já vem com tudo sugerido e salva cada mudança:
    - **Títulos:** filmes ou série, na ordem do disco (suba e desça cada um). Os nomes vêm do
      TMDB quando o match está confirmado, ou do nome do arquivo.
    - **Idiomas, para o disco todo:** os idiomas de áudio e de legenda, o áudio que toca
@@ -160,9 +161,36 @@ A pasta de trabalho precisa de **cerca de 3 vezes o tamanho do disco** livre com
 (uns 27 GB para um DVD-9; 2 vezes sem ele): cada arquivo intermediário é apagado assim que a
 etapa seguinte dá certo, e **Apagar arquivos temporários**, na tela do job, remove o que sobrar.
 
+## Montando um Blu-ray
+
+Uma pasta com **um filme HD** (1080p ou 720p, 23,976 quadros/s, SDR) também oferece **BD-25**
+e **BD-50** na mesma tela, e um filme HD sugere o Blu-ray primeiro. O disco ainda não tem menu:
+começa sozinho, e os capítulos pulam pelo filme. Vários títulos por Blu-ray e os menus esperam
+um spike (Fase 6b): o tsMuxeR junta títulos sem realinhar áudio e legendas, então um disco
+juntado pede um trabalho que um disco com menu talvez não use.
+
+- **Vídeo:** um remux de Blu-ray (H.264 High até level 4.1, 1920x1080 ou 1440x1080, com o HRD,
+  as 4 slices e os GOPs de 1 segundo de um Blu-ray de verdade, conferidos nos primeiros
+  segundos com o `trace_headers`) é **copiado byte a byte**. O resto é codificado pelo x264 em
+  modo Blu-ray (2 passadas, `bluray-compat`, level 4.1, GOPs fechados, sempre 8 bits), com
+  faixas pretas até o quadro inteiro; arquivos WEB-DL são recodificados, mesmo o tsMuxeR
+  aceitando sem reclamar.
+- **Áudio:** AC-3, DTS, DTS-HD MA e LPCM são copiados (sem perda continua sem perda); TrueHD,
+  E-AC-3, AAC e o resto viram AC-3 640k. O tsMuxeR ignora o atraso de uma faixa do MKV, então
+  cada faixa é gravada já alinhada (LPCM com silêncio no início; AC-3 ou DTS atrasado é
+  convertido).
+- **Legendas:** PGS é copiado; `.srt` e legenda em texto do MKV viram PGS.
+- **QA:** o ISO é lido pela **libbluray** e pela **libudfread** (as bibliotecas com que o VLC
+  toca discos, por ctypes, sem montar): árvore BDMV, First Playback, duração da playlist,
+  capítulos, cada faixa e o idioma, cada áudio cobrindo o filme todo, decodificação completa e
+  o H.264 do disco idêntico ao que o tsMuxeR recebeu. O job também reprova quando o tsMuxeR
+  imprime um aviso, porque ele sai com 0 em discos que ele sabe que estão quebrados.
+- Grave o ISO como imagem (ImgBurn "Write image file" ou "Gravar imagem de disco" do Windows),
+  sem formatar o BD-R com área sobressalente. O primeiro disco deve ser testado num player.
+
 ## Imprimindo a capa
 
-O botão **Capa** de uma pasta abre a capa do disco que ela monta (ela lê o que o Montar DVD
+O botão **Capa** de uma pasta abre a capa do disco que ela monta (ela lê o que o Montar disco
 salvou: títulos, idiomas, fundo e cor de destaque).
 
 ![O encarte da caixa: verso, lombada e frente numa folha A4](docs/images/cover-preview.png)
@@ -191,7 +219,8 @@ salvou: títulos, idiomas, fundo e cor de destaque).
 - httpx2 para a API do TMDB (e o `MockTransport` dele nos testes: eles nunca chamam o TMDB)
 - Pillow para as páginas do menu, as capas e o PDF
 - SQLite (WAL) com SQLModel e Alembic; um processo worker separado roda os jobs
-- Ferramentas de mídia: ffmpeg, dvdauthor/spumux, genisoimage, tsMuxeR, xorriso
+- Ferramentas de mídia: ffmpeg (libx264), dvdauthor/spumux, genisoimage, tsMuxeR, libbluray e
+  libudfread (ctypes), xorriso
 - Docker e docker compose; CI no GitHub Actions
 - uv, ruff, mypy (strict), pytest
 
