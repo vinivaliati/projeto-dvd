@@ -213,3 +213,45 @@ def test_the_frame_scan_reads_key_frames_and_times() -> None:
     entries = source.frame_scan_command(Path("/m/a.mkv"), 100.0)
     shown = entries[entries.index("-show_entries") + 1]
     assert "key_frame" in shown and "best_effort_timestamp_time" in shown
+
+
+def bd(*streams: dict[str, Any], duration: str | None = "7200") -> source.SourceCheck:
+    fmt = {} if duration is None else {"duration": duration}
+    return check_video(summarize({"streams": list(streams), "format": fmt}), "bluray")
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [{}, {"height": 800}, {"width": 1440, "sample_aspect_ratio": "4:3"},
+     {"width": 1280, "height": 720}, {"width": 1280, "height": 544}],
+)  # fmt: skip
+def test_blu_ray_accepts_hd_film(fields: dict[str, Any]) -> None:
+    result = bd(stream(**fields), AUDIO)
+
+    assert result.reasons == ()
+    assert result.mode == VideoMode.FILM
+
+
+@pytest.mark.parametrize(
+    ("fields", "reason"),
+    [
+        ({"width": 720, "height": 480}, source.BD_SD),
+        ({"codec_name": "mpeg2video", "width": 720, "height": 480}, source.BD_SD),
+        ({"width": 1440, "height": 1080, "sample_aspect_ratio": "1:1"},
+         source.BD_FRAME.format(size="1440x1080")),
+        ({"width": 1600, "height": 900}, source.BD_FRAME.format(size="1600x900")),
+        ({"r_frame_rate": "25/1", "avg_frame_rate": "25/1"}, source.PAL),
+        ({"r_frame_rate": "30000/1001", "avg_frame_rate": "30000/1001", "field_order": "tt"},
+         source.INTERLACED_HD),
+        ({"color_transfer": "smpte2084"}, source.HDR),
+        ({"width": 3840, "height": 2160}, source.ABOVE_1080P),
+    ],
+)  # fmt: skip
+def test_blu_ray_refusals(fields: dict[str, Any], reason: str) -> None:
+    assert reason in bd(stream(**fields), AUDIO).reasons
+
+
+def test_blu_ray_never_asks_for_a_frame_scan() -> None:
+    result = bd(stream(codec_name="mpeg2video", width=720, height=480), AUDIO)
+
+    assert not result.needs_frame_scan and result.mode is None

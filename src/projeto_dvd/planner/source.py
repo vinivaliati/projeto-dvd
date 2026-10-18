@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Literal
 
 from projeto_dvd.library.probe import Summary, Video
+from projeto_dvd.planner.profiles import Medium
 
 NO_VIDEO = "O arquivo não tem imagem, só áudio."
 NO_AUDIO = "O vídeo não tem áudio."
@@ -15,7 +16,7 @@ NO_DURATION = (
     "Não foi possível ler a duração do vídeo. Escaneie de novo; se continuar, o arquivo pode "
     "estar danificado."
 )
-HDR = "O vídeo está em HDR (HDR10, HLG ou Dolby Vision), e o app ainda não converte HDR para DVD."
+HDR = "O vídeo está em HDR (HDR10, HLG ou Dolby Vision), e o app ainda não converte HDR."
 ABOVE_1080P = "O vídeo é maior que 1080p (4K?), e o app ainda não converte essa resolução."
 VARIABLE_FPS = (
     "O vídeo tem taxa de quadros variável (comum em gravação de celular ou de tela). Ainda não "
@@ -27,6 +28,10 @@ INTERLACED_HD = "O vídeo é entrelaçado em 1080i (gravação de TV). Ainda nã
 INTERLACED_OTHER = "O vídeo é entrelaçado fora de 720x480. Ainda não suportado."
 PROGRESSIVE_2997 = "O vídeo está em 29,97 quadros por segundo progressivos. Ainda não suportado."
 FPS_5994 = "O vídeo está em 59,94 quadros por segundo. Ainda não suportado."
+BD_SD = "O vídeo é SD (até 576 linhas): o lugar dele é o DVD."
+BD_FRAME = (
+    "O tamanho da imagem ({size}) não é um dos do Blu-ray (1920x1080, 1440x1080 ou 1280x720)."
+)
 FRAMES_UNREADABLE = (
     "Não foi possível ler os quadros do vídeo. Escaneie de novo; se continuar, o arquivo pode "
     "estar danificado."
@@ -35,6 +40,7 @@ FRAMES_UNREADABLE = (
 FILM_RATE = Fraction(24000, 1001)
 NTSC_RATE = Fraction(30000, 1001)
 SD_WIDTHS = (720, 704)
+SD_MAX_WIDTH = 1024  # a frame up to 1024x576 is SD (DVD); 1280x544 is a scope 720p
 WINDOW_GAP = 1.0  # seconds between two frames of the sample that start a new window
 INTERLACED_ORDERS = frozenset({"tt", "bb", "tb", "bt"})
 WINDOW_SECONDS = 20
@@ -60,8 +66,8 @@ class SourceCheck:
     needs_frame_scan: bool
 
 
-def check_video(summary: Summary) -> SourceCheck:
-    """Every reason the source cannot become a DVD yet, all at once."""
+def check_video(summary: Summary, medium: Medium = "dvd") -> SourceCheck:
+    """Every reason the source cannot become a DVD (or a Blu-ray) yet, all at once."""
     video = summary.video
     if video is None:
         return SourceCheck((NO_VIDEO,), None, True, False)
@@ -75,6 +81,8 @@ def check_video(summary: Summary) -> SourceCheck:
     if video.width > 1920 or video.height > 1080:
         reasons.append(ABOVE_1080P)
     top_field_first = (video.field_order or "t")[0] != "b"
+    if medium == "bluray":
+        return _blu_ray(video, reasons)
     if _is_dvd_mpeg2(video):
         # The stream rate of a DVD rip lies (soft telecine): the frames decide later.
         return SourceCheck(tuple(reasons), None, top_field_first, not reasons)
@@ -163,6 +171,38 @@ def geometry(video: Video) -> Geometry:
         height = min(480, _multiple(480 * target / dar, 4))
         return Geometry(aspect, 720, height, scale=True)
     return Geometry(aspect, min(720, _multiple(720 * dar / target, 2)), 480, scale=True)
+
+
+def _blu_ray(video: Video, reasons: list[str]) -> SourceCheck:
+    """HD film only: 23.976 progressive in one of the Blu-ray frame sizes (SD goes to the DVD)."""
+    sd = video.width <= SD_MAX_WIDTH and video.height <= 576
+    if sd:
+        reasons.append(BD_SD)
+    elif video.width <= 1920 and video.height <= 1080 and bd_frame(video) is None:
+        reasons.append(BD_FRAME.format(size=f"{video.width}x{video.height}"))
+    mode, rate_reason = _mode_from_rate(video)
+    if rate_reason and not sd:
+        reasons.append(rate_reason)
+    film = mode == VideoMode.FILM and not reasons
+    return SourceCheck(tuple(reasons), VideoMode.FILM if film else None, True, False)
+
+
+def bd_frame(video: Video) -> tuple[int, int, bool] | None:
+    """The Blu-ray frame of a source: (width, height, scaled); None when it has none.
+
+    A wide movie (1920x800) is padded to 1920x1080; an anamorphic 1440x1080 is legal as it is
+    and scaled only when encoded.
+    """
+    sar = video.sar or Fraction(1)
+    if video.width == 1440 and video.height == 1080 and sar == Fraction(4, 3):
+        return 1920, 1080, True
+    if sar != 1:
+        return None
+    if video.width == 1920 and video.height <= 1080:
+        return 1920, 1080, False
+    if SD_MAX_WIDTH < video.width <= 1280 and video.height <= 720:
+        return 1280, 720, False
+    return None
 
 
 def _is_dvd_mpeg2(video: Video) -> bool:
