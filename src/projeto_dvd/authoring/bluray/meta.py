@@ -45,10 +45,10 @@ def bd_meta(plan: DiscPlan, inputs: BdInputs) -> str:
         f"--custom-chapters={chapters_text(title.chapters)}",
         f'V_MPEG4/ISO/AVC, "{inputs.video}", fps=23.976',
     ]
-    for n, (choice, path) in enumerate(zip(title.audio, inputs.audio, strict=True)):
-        codec = AUDIO_CODECS[audio_suffix(choice)]
+    for n, (track, path) in enumerate(zip(title.audio, inputs.audio, strict=True)):
+        codec = AUDIO_CODECS[audio_suffix(track)]
         default = ", default" if n == 0 else ""
-        lines.append(f'{codec}, "{path}", lang={iso_639_2(choice.language)}{default}')
+        lines.append(f'{codec}, "{path}", lang={iso_639_2(track.language)}{default}')
     for n, (choice, path) in enumerate(zip(title.subtitles, inputs.subtitles, strict=True), 1):
         on = ", default=all" if n == plan.subtitle_on else ""
         language = f"lang={iso_639_2(choice.language)}"
