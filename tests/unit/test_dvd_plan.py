@@ -3,10 +3,12 @@ from typing import Any
 import pytest
 
 from projeto_dvd.library.files import ExternalSubtitle
-from projeto_dvd.library.probe import Summary, summarize
+from projeto_dvd.library.probe import AudioTrack, Summary, summarize
 from projeto_dvd.planner import dvd_plan
 from projeto_dvd.planner.dvd_plan import (
+    SubtitleChoice,
     audio_output,
+    bd_audio_output,
     plan_chapters,
     subtitle_options,
     volume_name,
@@ -161,3 +163,54 @@ def test_unknown_subtitle_codec_has_a_generic_reason() -> None:
     option = subtitle_options(summary, ())[0]
 
     assert (option.supported, option.reason) == (False, dvd_plan.OTHER_SUBTITLE)
+
+
+def bd_track(codec: str, channels: int = 6, **fields: Any) -> AudioTrack:
+    stream = {"index": 1, "codec_type": "audio", "codec_name": codec, "channels": channels,
+              "sample_rate": "48000", **fields}  # fmt: skip
+    return make(stream).audio[0]
+
+
+@pytest.mark.parametrize(
+    ("track", "expected"),
+    [
+        (bd_track("ac3", bit_rate="640000"), ("copy", 6, 640, None)),
+        (bd_track("ac3", bit_rate="448000"), ("copy", 6, 448, None)),
+        (bd_track("ac3"), ("copy", 6, 640, None)),
+        (bd_track("ac3", sample_rate="44100", bit_rate="448000"), ("ac3", 6, 640, None)),
+        (bd_track("dts", profile="DTS", bit_rate="1509000"), ("copy", 6, 1509, None)),
+        (bd_track("dts", profile="DTS"), ("copy", 6, 1536, None)),
+        (bd_track("dts", 8, profile="DTS-HD MA", bits_per_raw_sample="24"),
+         ("copy", 8, 9216, None)),
+        (bd_track("dts", 6, profile="DTS-HD MA + DTS:X"), ("copy", 6, 6912, None)),
+        (bd_track("dts", 6, profile="DTS-HD HRA", bits_per_raw_sample="16"),
+         ("copy", 6, 4608, None)),
+        (bd_track("dts", 2, profile="DTS Express"), ("ac3", 2, 256, 2)),
+        (bd_track("pcm_s24le", 2), ("copy", 2, 2304, None)),
+        (bd_track("pcm_s16le", 6), ("copy", 6, 4608, None)),
+        (bd_track("truehd", 8), ("ac3", 6, 640, 6)),
+        (bd_track("eac3", 6), ("ac3", 6, 640, None)),
+        (bd_track("aac", 2), ("ac3", 2, 256, 2)),
+        (bd_track("opus", 1), ("ac3", 1, 128, 1)),
+    ],
+)  # fmt: skip
+def test_blu_ray_audio_output(
+    track: AudioTrack, expected: tuple[str, int, int, int | None]
+) -> None:
+    out = bd_audio_output(track)
+
+    assert (out.action, out.channels, out.kbps, out.downmix) == expected
+
+
+def test_pgs_is_supported_only_on_blu_ray() -> None:
+    options = subtitle_options(make(subtitle(3, "por", codec="hdmv_pgs_subtitle"),
+                                    subtitle(4, "eng")), ())  # fmt: skip
+
+    assert [(o.supported, o.bd_supported) for o in options] == [(False, True), (True, True)]
+
+
+def test_old_subtitle_choices_are_text() -> None:
+    old = SubtitleChoice.model_validate({"key": "s3", "stream_index": 3, "file": None,
+                                         "language": "pt"})  # fmt: skip
+
+    assert old.codec == "text"

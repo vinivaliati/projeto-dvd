@@ -16,9 +16,14 @@ from projeto_dvd.library.scan import FolderView
 from projeto_dvd.metadata.details import TitleInfo, generic_episode_name
 from projeto_dvd.metadata.filename import Guess, guess
 from projeto_dvd.planner.disc_plan import UND, DiscChoices, Kind
-from projeto_dvd.planner.dvd_plan import SubtitleOption, audio_output, subtitle_options
+from projeto_dvd.planner.dvd_plan import (
+    SubtitleOption,
+    audio_output,
+    bd_audio_output,
+    subtitle_options,
+)
 from projeto_dvd.planner.languages import dvd_language, language_name
-from projeto_dvd.planner.profiles import PROFILES
+from projeto_dvd.planner.profiles import PROFILES, Medium
 from projeto_dvd.planner.source import geometry
 
 MAX_TITLES = 60  # each title costs 2 of the 128 commands of the VMGM dispatcher
@@ -114,25 +119,33 @@ def audio_languages(titles: Sequence[DiscTitle]) -> tuple[str, ...]:
     return tuple(dict.fromkeys(found))
 
 
-def subtitle_languages(titles: Sequence[DiscTitle]) -> tuple[str, ...]:
-    found = (o.language or UND for t in titles for o in t.options if o.supported)
+def subtitle_languages(titles: Sequence[DiscTitle], medium: Medium = "dvd") -> tuple[str, ...]:
+    found = (o.language or UND for t in titles for o in t.options if _usable(o, medium))
     return tuple(dict.fromkeys(found))
 
 
-def best_audio(title: DiscTitle, language: str) -> AudioTrack | None:
+def best_audio(title: DiscTitle, language: str, medium: Medium = "dvd") -> AudioTrack | None:
+    """The main track of a language; a Blu-ray first takes one it can copy (the AC-3 core
+    MakeMKV keeps next to a TrueHD track, a DTS-HD MA)."""
     tracks = [t for t in title.summary.audio if track_language(t.language) == language]
     if not tracks:
         return None
     return min(
         tracks,
-        key=lambda t: (bool(_COMMENTARY.search(t.title or "")), -(t.channel_count or 0), t.index),
-    )
+        key=lambda t: (bool(_COMMENTARY.search(t.title or "")),
+                       medium == "bluray" and bd_audio_output(t).action != "copy",
+                       -(t.channel_count or 0), t.index),
+    )  # fmt: skip
 
 
-def best_subtitle(title: DiscTitle, language: str) -> SubtitleOption | None:
+def best_subtitle(title: DiscTitle, language: str, medium: Medium = "dvd") -> SubtitleOption | None:
     """The full subtitle; a forced-only language counts as missing (it subtitles little)."""
-    options = [o for o in title.options if o.supported and (o.language or UND) == language]
+    options = [o for o in title.options if _usable(o, medium) and (o.language or UND) == language]
     return next((o for o in options if not o.forced), None)
+
+
+def _usable(option: SubtitleOption, medium: Medium) -> bool:
+    return option.bd_supported if medium == "bluray" else option.supported
 
 
 def fallback_audio(title: DiscTitle, choices: DiscChoices) -> str:
@@ -283,15 +296,18 @@ def reconcile(
     paths = {t.path for t in titles}
     kept = [p for p in choices.order if p in paths]
     order = (*kept, *(p for p in suggestion.order if p not in kept))
+    profile = choices.profile if choices.profile in PROFILES else suggestion.profile
+    medium = PROFILES[profile].medium
     audio = tuple(lang for lang in choices.audio if lang in audio_languages(titles))
-    subtitles = tuple(lang for lang in choices.subtitles if lang in subtitle_languages(titles))
+    found = subtitle_languages(titles, medium)
+    subtitles = tuple(lang for lang in choices.subtitles if lang in found)
     theme = choices.theme
     if theme.backdrop not in backdrops:
         theme = theme.model_copy(update={"backdrop": None})
     return choices.model_copy(
         update={
             "order": order,
-            "profile": choices.profile if choices.profile in PROFILES else suggestion.profile,
+            "profile": profile,
             "audio": audio or suggestion.audio,
             "subtitles": subtitles,
             "subtitle_on": choices.subtitle_on if choices.subtitle_on in subtitles else None,
