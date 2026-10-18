@@ -49,3 +49,7 @@ markers = ["slow: integration tests that need the media toolchain (run inside th
 
 [tool.coverage.report]
 exclude_also = ['if __name__ == "__main__":']
+
+[tool.coverage.run]
+# ctypes on libbluray and libudfread, which only the Docker image has: covered by the slow tests.
+omit = ["src/projeto_dvd/authoring/bluray/libs.py"]
